@@ -4,28 +4,6 @@ import sys
 import os
 import subprocess
 
-# Python 2.6 doesn't have subprocess.check_output
-try:
-    subprocess.check_output
-except AttributeError:
-    def check_output_compat(*popenargs, **kwargs):
-        # This function was copied from Python 2.7's subprocess module.
-        # This function only is:
-        # Copyright (c) 2003-2005 by Peter Astrand <astrand@lysator.liu.se>
-        # Licensed to PSF under a Contributor Agreement.
-        # See http://www.python.org/2.4/license for licensing details.
-        if 'stdout' in kwargs:
-            raise ValueError('stdout argument not allowed, it will be overridden.')
-        process = subprocess.Popen(stdout=subprocess.PIPE, *popenargs, **kwargs)
-        output, unused_err = process.communicate()
-        retcode = process.poll()
-        if retcode:
-            cmd = kwargs.get("args")
-            if cmd is None:
-                cmd = popenargs[0]
-            raise subprocess.CalledProcessError(retcode, cmd, output=output)
-        return output
-    subprocess.check_output = check_output_compat
 
 # Access through env['VERSION'], env['RPM_VERSION'], and env['RPM_RELEASE'] to
 # allow users to override these. RPM versioning is explained here:
@@ -68,7 +46,7 @@ Help(opts.GenerateHelpText(env))
 # Needed for Clang Static Analyzer's scan-build tool
 env["CC"] = os.getenv("CC") or env["CC"]
 env["CXX"] = os.getenv("CXX") or env["CXX"]
-for k, v in os.environ.items():
+for k, v in list(os.environ.items()):
     if k.startswith("CCC_"):
         env["ENV"][k] = v
 
@@ -92,10 +70,10 @@ def detect_compiler():
 if env['CXX_FAMILY'].lower() == 'auto':
     try:
         detect_compiler()
-        print 'Detected compiler %s %s' % (env['CXX_FAMILY'],
-                                           env['CXX_VERSION'])
+        print('Detected compiler %s %s' % (env['CXX_FAMILY'],
+                                           env['CXX_VERSION']))
     except BaseException as e:
-        print 'Could not detect compiler: %s' % e
+        print('Could not detect compiler: %s' % e)
         pass
 
 CXX_STANDARD = 'c++11'
@@ -183,7 +161,7 @@ if env["BUILDTYPE"] == "DEBUG":
 elif env["BUILDTYPE"] == "RELEASE":
     env.Append(CPPFLAGS = [ "-DNDEBUG", "-O2" ])
 else:
-    print "Error BUILDTYPE must be RELEASE or DEBUG"
+    print("Error BUILDTYPE must be RELEASE or DEBUG")
     sys.exit(-1)
 
 if env["VERBOSE"] == "0":
@@ -213,7 +191,7 @@ env.AddMethod(Protobuf)
 def GetNumCPUs():
     if env["NUMCPUS"] != "0":
         return int(env["NUMCPUS"])
-    if os.sysconf_names.has_key("SC_NPROCESSORS_ONLN"):
+    if "SC_NPROCESSORS_ONLN" in os.sysconf_names:
         cpus = os.sysconf("SC_NPROCESSORS_ONLN")
         if isinstance(cpus, int) and cpus > 0:
             return 2*cpus
@@ -241,7 +219,7 @@ SConscript('test/SConscript', variant_dir='build/test')
 # This function is taken from http://www.scons.org/wiki/PhonyTargets
 def PhonyTargets(env = None, **kw):
     if not env: env = DefaultEnvironment()
-    for target,action in kw.items():
+    for target,action in list(kw.items()):
         env.AlwaysBuild(env.Alias(target, [], action))
 
 PhonyTargets(check = "scripts/cpplint.py")
@@ -414,7 +392,7 @@ def remove_sources(env, target, source):
             garbage.update(g.sources)
     for g in garbage:
         if env['VERBOSE'] == '1':
-            print 'rm %s' % g
+            print('rm %s' % g)
         try:
             os.remove(str(g))
         except OSError:
@@ -423,7 +401,7 @@ def remove_sources(env, target, source):
 # Rename PACKAGEROOT directory and subdirectories (should be empty)
 def remove_packageroot(env, target, source):
     if env['VERBOSE'] == '1':
-        print 'rm -r %s' % PACKAGEROOT
+        print('rm -r %s' % PACKAGEROOT)
     import shutil
     shutil.rmtree(str(PACKAGEROOT))
 
