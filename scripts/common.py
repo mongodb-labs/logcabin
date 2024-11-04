@@ -32,7 +32,7 @@ def sh(command, bg=False, **kwargs):
 
     kwargs['shell'] = True
     if bg:
-        return subprocess.Popen(command, **kwargs)
+        return subprocess.Popen(command, **kwargs, text=True)
     else:
         subprocess.check_call(command, **kwargs)
 
@@ -41,7 +41,7 @@ def captureSh(command, **kwargs):
 
     kwargs['shell'] = True
     kwargs['stdout'] = subprocess.PIPE
-    p = subprocess.Popen(command, **kwargs)
+    p = subprocess.Popen(command, **kwargs, text=True)
     output = p.communicate()[0]
     if p.returncode:
         raise subprocess.CalledProcessError(p.returncode, command)
@@ -74,13 +74,13 @@ class Sandbox(object):
                  which was run, otherwise None.
         """
         if bg:
-            sonce = ''.join([chr(random.choice(range(ord('a'), ord('z'))))
+            sonce = ''.join([chr(random.choice(list(range(ord('a'), ord('z')))))
                              for c in range(8)])
             # Assumes scripts are at same path on remote machine
             sh_command = ['ssh', host,
                           '%s/regexec' % scripts_path, sonce,
                           os.getcwd(), "'%s'" % command]
-            p = subprocess.Popen(sh_command, **kwargs)
+            p = subprocess.Popen(sh_command, **kwargs, text=True)
             process = self.Process(host, command, kwargs, sonce,
                                    p, ignoreFailures)
             self.processes.append(process)
@@ -139,8 +139,8 @@ class Sandbox(object):
             if (p.ignoreFailures == False):
                 rc = p.proc.poll()
                 if rc is not None and rc != 0:
-                    print ('Process exited with status %d (%s)' %
-                           (rc, p.command))
+                    print(('Process exited with status %d (%s)' %
+                           (rc, p.command)))
                     raise subprocess.CalledProcessError(rc, p.command)
 
 @contextlib.contextmanager
@@ -149,8 +149,8 @@ def delayedInterrupts():
     quit = []
     def delay(sig, frame):
         if quit:
-            print ('Ctrl-C: Quitting during delayed interrupts section ' +
-                   'because user insisted')
+            print(('Ctrl-C: Quitting during delayed interrupts section ' +
+                   'because user insisted'))
             raise KeyboardInterrupt
         else:
             quit.append((sig, frame))

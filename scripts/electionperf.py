@@ -18,7 +18,7 @@ This runs a LogCabin cluster and continually kills off the leader, timing how
 long each leader election takes.
 """
 
-from __future__ import print_function
+
 from common import sh, captureSh, Sandbox, hosts
 import re
 import subprocess
@@ -55,13 +55,13 @@ def await_stable_leader(sandbox, server_ids, after_term=0):
                 m = re.search('Running for election in term (\d+)', line)
                 if m is not None:
                     b['wake'] = int(m.group(1))
-        terms = [b['term'] for b in server_beliefs.values()]
-        leaders = [b['leader'] for b in server_beliefs.values()]
+        terms = [b['term'] for b in list(server_beliefs.values())]
+        leaders = [b['leader'] for b in list(server_beliefs.values())]
         if same(terms) and terms[0] > after_term:
             assert same(leaders), server_beliefs
             return {'leader': leaders[0],
                     'term': terms[0],
-                    'num_woken': sum([1 for b in server_beliefs.values() if b['wake'] > after_term])}
+                    'num_woken': sum([1 for b in list(server_beliefs.values()) if b['wake'] > after_term])}
         else:
             time.sleep(.25)
             sandbox.checkFailures()
@@ -70,7 +70,7 @@ with Sandbox() as sandbox:
     sh('rm -f debug/*')
     sh('mkdir -p debug')
 
-    server_ids = range(1, num_servers + 1)
+    server_ids = list(range(1, num_servers + 1))
     servers = {}
 
     def start(server_id):

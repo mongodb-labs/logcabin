@@ -33,7 +33,7 @@ Options:
                        exiting with an error [default: 10]
 """
 
-from __future__ import print_function, division
+
 from common import sh, captureSh, Sandbox, smokehosts
 from docopt import docopt
 import os
@@ -51,7 +51,7 @@ def main():
         reconf_opts = ""
     timeout = int(arguments['--timeout'])
 
-    server_ids = range(1, num_servers + 1)
+    server_ids = list(range(1, num_servers + 1))
     cluster = "--cluster=%s" % ','.join([h[0] for h in
                                         smokehosts[:num_servers]])
     alphabet = [chr(ord('a') + i) for i in range(26)]

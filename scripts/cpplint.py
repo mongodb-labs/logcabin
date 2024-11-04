@@ -519,7 +519,7 @@ class _CppLintState(object):
 
   def PrintErrorCounts(self):
     """Print a summary of errors by category, and the total."""
-    for category, count in self.errors_by_category.iteritems():
+    for category, count in self.errors_by_category.items():
       sys.stderr.write('Category \'%s\' errors found: %d\n' %
                        (category, count))
     sys.stderr.write('Total errors found: %d\n' % self.error_count)
@@ -962,7 +962,7 @@ def CheckForCopyright(filename, lines, error):
 
   # We'll say it should occur by line 10. Don't forget there's a
   # dummy line at the front.
-  for line in xrange(1, min(len(lines), 11)):
+  for line in range(1, min(len(lines), 11)):
     if re.search(r'Copyright', lines[line], re.I): break
   else:                       # means no copyright line was found
     error(filename, 0, 'legal/copyright', 5,
@@ -1060,7 +1060,7 @@ def CheckForUnicodeReplacementCharacters(filename, lines, error):
     error: The function to call with any errors found.
   """
   for linenum, line in enumerate(lines):
-    if u'\ufffd' in line:
+    if '\ufffd' in line:
       error(filename, linenum, 'readability/utf8', 5,
             'Line contains invalid UTF-8 (or Unicode replacement character).')
 
@@ -1550,7 +1550,7 @@ def CheckForFunctionLengths(filename, clean_lines, linenum,
 
   if starting_func:
     body_found = False
-    for start_linenum in xrange(linenum, clean_lines.NumLines()):
+    for start_linenum in range(linenum, clean_lines.NumLines()):
       start_line = lines[start_linenum]
       joined_line += ' ' + start_line.lstrip()
       if Search(r'(;|})', start_line):  # Declarations and trivial functions
@@ -2014,7 +2014,7 @@ def GetLineWidth(line):
     The width of the line in column positions, accounting for Unicode
     combining characters and wide characters.
   """
-  if isinstance(line, unicode):
+  if isinstance(line, str):
     width = 0
     for c in unicodedata.normalize('NFC', line):
       if unicodedata.east_asian_width(c) in ('W', 'F'):
@@ -2803,7 +2803,7 @@ def CheckForIncludeWhatYouUse(filename, clean_lines, include_state, error,
   required = {}  # A map of header name to linenumber and the template entity.
                  # Example of required: { '<functional>': (1219, 'less<>') }
 
-  for linenum in xrange(clean_lines.NumLines()):
+  for linenum in range(clean_lines.NumLines()):
     line = clean_lines.elided[linenum]
     if not line or line[0] == '#':
       continue
@@ -2848,7 +2848,7 @@ def CheckForIncludeWhatYouUse(filename, clean_lines, include_state, error,
 
   # include_state is modified during iteration, so we iterate over a copy of
   # the keys.
-  for header in include_state.keys():  #NOLINT
+  for header in list(include_state.keys()):  #NOLINT
     (same_module, common_path) = FilesBelongToSameModule(abs_filename, header)
     fullpath = common_path + header
     if same_module and UpdateIncludeState(fullpath, include_state, io):
@@ -2932,7 +2932,7 @@ def ProcessFileData(filename, file_extension, lines, error):
 
   RemoveMultiLineComments(filename, lines, error)
   clean_lines = CleansedLines(lines)
-  for line in xrange(clean_lines.NumLines()):
+  for line in range(clean_lines.NumLines()):
     ProcessLine(filename, file_extension, clean_lines, line,
                 include_state, function_state, class_state, error)
   class_state.CheckFinished(filename, error)
@@ -2945,7 +2945,7 @@ def ProcessFileData(filename, file_extension, lines, error):
   #       break;
   # where a break; was intended after doStuff()
   lines = clean_lines.elided
-  for line in xrange(clean_lines.NumLines()):
+  for line in range(clean_lines.NumLines()):
       if not Search(r'\s+case .*:', lines[line]):
           continue
       if Search(r'\bNOLINT\b', lines[line]):
@@ -3170,7 +3170,7 @@ def main():
   # Merge error counts as produced by workers:
   for state in states:
     _cpplint_state.error_count += state.error_count
-    for cat, num in state.errors_by_category.items():
+    for cat, num in list(state.errors_by_category.items()):
       if cat in _cpplint_state.errors_by_category:
         _cpplint_state.errors_by_category[cat] += num
       else:

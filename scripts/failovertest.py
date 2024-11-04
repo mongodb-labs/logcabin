@@ -39,7 +39,7 @@ Options:
                            [default: 0]
 """
 
-from __future__ import print_function, division
+
 from common import sh, captureSh, Sandbox, smokehosts
 from docopt import docopt
 import os
@@ -59,7 +59,7 @@ def main():
     killinterval = int(arguments['--killinterval'])
     launchdelay = int(arguments['--launchdelay'])
 
-    server_ids = range(1, num_servers + 1)
+    server_ids = list(range(1, num_servers + 1))
     cluster = "--cluster=%s" % ','.join([h[0] for h in
                                         smokehosts[:num_servers]])
     with Sandbox() as sandbox:
@@ -124,7 +124,7 @@ def main():
                 print('Timeout met with no errors')
                 break
             if now - lastkill > killinterval:
-                server_id = random.choice(processes.keys())
+                server_id = random.choice(list(processes.keys()))
                 print('Killing server %d' % server_id)
                 sandbox.kill(processes[server_id])
                 del processes[server_id]

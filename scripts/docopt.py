@@ -105,7 +105,7 @@ def transform(pattern):
     while groups:
         children = groups.pop(0)
         parents = [Required, Optional, OptionsShortcut, Either, OneOrMore]
-        if any(t in map(type, children) for t in parents):
+        if any(t in list(map(type, children)) for t in parents):
             child = [c for c in children if type(c) in parents][0]
             children.remove(child)
             if type(child) is Either:
@@ -499,7 +499,7 @@ def formal_usage(section):
 
 def extras(help, version, options, doc):
     if help and any((o.name in ('-h', '--help')) and o.value for o in options):
-        print(doc.strip("\n"))
+        print((doc.strip("\n")))
         sys.exit()
     if version and any(o.name == '--version' and o.value for o in options):
         print(version)
