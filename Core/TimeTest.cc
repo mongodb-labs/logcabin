@@ -259,6 +259,8 @@ TEST(CoreTime, rdtsc_progressTimingSensitive) {
     EXPECT_LT(a, b);
 #if defined(__i386) || defined(__x86_64__)
     EXPECT_LT(a + 1000 * 1000, b);
+#elif defined(__aarch64__)
+#warning "TODO: write a timing test for ARM"
 #elif defined(__powerpc64__)
     EXPECT_LT(a + 1000 * 500, b);
 #else

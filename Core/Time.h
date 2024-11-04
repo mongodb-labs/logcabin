@@ -240,6 +240,10 @@ rdtsc()
     uint32_t lo, hi;
     __asm__ __volatile__("rdtsc" : "=a" (lo), "=d" (hi));
     return ((uint64_t(hi) << 32) | lo);
+#elif defined(__aarch64__)
+    uint64_t cntvct;
+    __asm__ __volatile__("mrs %0, cntvct_el0" : "=r" (cntvct));
+    return cntvct;
 #elif defined(__powerpc64__)
     return (__builtin_ppc_get_timebase());
 #else
