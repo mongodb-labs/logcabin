@@ -230,22 +230,24 @@ just want to run some tests and tear everything down again. Thus,
 to override the `smokehosts` and `hosts` variables found in `scripts/config.py`:
 
     smokehosts = hosts = [
-      ('192.168.2.1', '192.168.2.1', 1),
-      ('192.168.2.2', '192.168.2.2', 2),
-      ('192.168.2.3', '192.168.2.3', 3),
+      ('192.168.2.1', '192.168.2.1', 1, 5254),
+      ('192.168.2.2', '192.168.2.2', 2, 5254),
+      ('192.168.2.3', '192.168.2.3', 3, 5254),
     ]
 
 The scripts use this file to when launching servers using SSH. Each tuple in
 the (smoke)hosts list represents one server, containing:
 
  1. the address to use for SSH,
- 2. the address to use for LogCabin TCP connections, and
- 3. a unique ID.
+ 2. the address to use for LogCabin TCP connections,
+ 3. a unique ID,
+ 4. a port number.
 
 Each of these servers should be accessible over SSH without a password and
 should have the LogCabin directory available in the same filesystem location.
 The script currently assumes this directory to be on a shared filesystem, such
-as an NFS mount or localhost.
+as an NFS mount or localhost. If the address to use for SSH is `localhost`,
+make sure that `ssh localhost` works.
 
 You may optionally create a `smoketest.conf` file, which can define
 various options that apply to all the servers. The servers' listen addresses

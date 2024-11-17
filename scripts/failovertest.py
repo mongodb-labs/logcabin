@@ -60,15 +60,15 @@ def main():
     launchdelay = int(arguments['--launchdelay'])
 
     server_ids = list(range(1, num_servers + 1))
-    cluster = "--cluster=%s" % ','.join([h[0] for h in
-                                        smokehosts[:num_servers]])
+    cluster = "--cluster=%s" % ','.join([
+        '%s:%s' % (server, port) for server, ip, server_id, port in
+        smokehosts[:num_servers]])
     with Sandbox() as sandbox:
         sh('rm -rf smoketeststorage/')
         sh('rm -f debug/*')
         sh('mkdir -p debug')
 
-        for server_id in server_ids:
-            host = smokehosts[server_id - 1]
+        for server, ip, server_id, port in smokehosts:
             with open('smoketest-%d.conf' % server_id, 'w') as f:
                 try:
                     f.write(open('smoketest.conf').read())
@@ -76,7 +76,7 @@ def main():
                 except:
                     pass
                 f.write('serverId = %d\n' % server_id)
-                f.write('listenAddresses = %s\n' % host[0])
+                f.write('listenAddresses = %s:%d\n' % (server, port))
 
 
         print('Initializing first server\'s log')
@@ -89,12 +89,12 @@ def main():
         processes = {}
 
         def launch_server(server_id):
-            host = smokehosts[server_id - 1]
+            server, ip, server_id, port = smokehosts[server_id - 1]
             command = ('%s --config smoketest-%d.conf -l %s' %
                        (server_command, server_id, 'debug/%d' % server_id))
-            print('Starting %s on %s' % (command, host[0]))
+            print('Starting %s on %s:%d' % (command, server, port))
             processes[server_id] = sandbox.rsh(
-                host[0], command, bg=True)
+                server, command, bg=True)
             sandbox.checkFailures()
 
         for server_id in server_ids:
@@ -104,7 +104,8 @@ def main():
         sh('build/Examples/Reconfigure %s %s set %s' %
            (cluster,
             reconf_opts,
-            ' '.join([h[0] for h in smokehosts[:num_servers]])))
+            ' '.join(['%s:%s' % (server, port) for server, ip, server_id, port in
+                      smokehosts[:num_servers]])))
 
         for i, client_command in enumerate(client_commands):
             print('Starting %s %s on localhost' % (client_command, cluster))

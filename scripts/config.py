@@ -66,13 +66,13 @@ os.environ['LD_LIBRARY_PATH'] = ':'.join(ld_library_path)
 
 # All of the hosts available for servers or clients; each entry
 # consists of a name for the host (for ssh), an IP address
-# to use for creating service locators. and an id for generating
-# Ethernet addresses.
+# to use for creating service locators, a unique server ID, and a port number.
 hosts = []
 for i in range(1, 61):
     hosts.append(('rc%02d' % i,
                   '192.168.1.%d' % (100 + i),
-                  i))
+                  i,
+                  5254))
 
 # The set of hosts available for basic correctness testing.
 smokehosts = hosts
