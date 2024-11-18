@@ -8,5 +8,6 @@
 /logcabin*.conf
 /scripts/localconfig.py
 /smoketest*.conf
+/consistencytest*.conf
 /smoketeststorage
 /storage
