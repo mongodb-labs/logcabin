@@ -191,15 +191,10 @@ lsHelper(DIR* dir, const std::string& path)
 
     std::vector<std::string> contents;
     while (true) {
-        struct dirent entry;
-        struct dirent* entryp;
-        if (readdir_r(dir, &entry, &entryp) != 0) {
-            PANIC("readdir(%s) failed: %s",
-                  path.c_str(), strerror(errno));
-        }
+        struct dirent* entryp = readdir(dir);
         if (entryp == NULL) // no more entries
             break;
-        const std::string name = entry.d_name;
+        const std::string name = entryp->d_name;
         if (name == "." || name == "..")
             continue;
         contents.push_back(name);
