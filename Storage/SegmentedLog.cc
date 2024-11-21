@@ -14,7 +14,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#define _BSD_SOURCE
 #include <endian.h>
 
 #include <algorithm>
@@ -757,7 +756,7 @@ SegmentedLog::truncateSuffix(uint64_t newEndIndex)
 void
 SegmentedLog::updateMetadata()
 {
-    if (Log::metadata.ByteSize() == 0)
+    if (Log::metadata.ByteSizeLong() == 0)
         metadata.clear_raft_metadata();
     else
         *metadata.mutable_raft_metadata() = Log::metadata;

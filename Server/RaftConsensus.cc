@@ -2579,7 +2579,7 @@ RaftConsensus::packEntries(
     // Calculating the size of the request ProtoBuf is a bit expensive, so this
     // estimates high, then if it reaches the size limit, corrects the estimate
     // and keeps going. This is a dumb algorithm but does well enough. It gets
-    // the number of calls to request.ByteSize() down to about 15 even with
+    // the number of calls to request.ByteSizeLong() down to about 15 even with
     // extremely small entries (10 bytes of payload data in each of 50,000
     // entries filling to a 1MB max).
 
@@ -2598,7 +2598,7 @@ RaftConsensus::packEntries(
         *request.mutable_entries();
 
     uint64_t numEntries = 0;
-    uint64_t currentSize = downCast<uint64_t>(request.ByteSize());
+    uint64_t currentSize = downCast<uint64_t>(request.ByteSizeLong());
 
     for (uint64_t index = nextIndex; index <= lastIndex; ++index) {
         const Log::Entry& entry = log->getEntry(index);
@@ -2608,12 +2608,12 @@ RaftConsensus::packEntries(
         // and a length. We conservatively assume the tag and length will
         // be up to 10 bytes each (2^64), though in practice the tag is
         // probably one byte and the length is probably two.
-        currentSize += uint64_t(entry.ByteSize()) + 20;
+        currentSize += uint64_t(entry.ByteSizeLong()) + 20;
 
         if (currentSize >= SOFT_RPC_SIZE_LIMIT) {
             // The message might be too big: calculate more exact but more
             // expensive size.
-            uint64_t actualSize = downCast<uint64_t>(request.ByteSize());
+            uint64_t actualSize = downCast<uint64_t>(request.ByteSizeLong());
             assert(currentSize >= actualSize);
             currentSize = actualSize;
             if (currentSize >= SOFT_RPC_SIZE_LIMIT && numEntries > 0) {
