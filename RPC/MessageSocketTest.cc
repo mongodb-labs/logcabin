@@ -20,7 +20,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Event/Loop.h"
 #include "RPC/MessageSocket.h"
 

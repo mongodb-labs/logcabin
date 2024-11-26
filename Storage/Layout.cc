@@ -18,7 +18,7 @@
 #include <fcntl.h>
 
 #include "Core/Config.h"
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/StringUtil.h"
 #include "Storage/Layout.h"
 

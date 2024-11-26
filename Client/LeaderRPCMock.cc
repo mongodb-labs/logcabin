@@ -16,7 +16,7 @@
 
 #include <gtest/gtest.h>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Client/LeaderRPCMock.h"
 #include "Core/ProtoBuf.h"
 

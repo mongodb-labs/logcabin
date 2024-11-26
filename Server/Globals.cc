@@ -16,7 +16,7 @@
 
 #include <signal.h>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/StringUtil.h"
 #include "Protocol/Common.h"
 #include "RPC/Server.h"

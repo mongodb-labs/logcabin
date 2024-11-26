@@ -19,7 +19,7 @@
 #include <sys/epoll.h>
 #include <unistd.h>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/StringUtil.h"
 #include "Event/File.h"
 #include "Event/Loop.h"

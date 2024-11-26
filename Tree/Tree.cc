@@ -18,7 +18,7 @@
 
 #include "build/Protocol/ServerStats.pb.h"
 #include "build/Tree/Snapshot.pb.h"
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/StringUtil.h"
 #include "Tree/Tree.h"
 

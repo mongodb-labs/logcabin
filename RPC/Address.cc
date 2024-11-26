@@ -23,7 +23,7 @@
 #include <sstream>
 #include <vector>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/Endian.h"
 #include "Core/Random.h"
 #include "Core/StringUtil.h"

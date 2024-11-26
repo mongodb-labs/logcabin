@@ -18,7 +18,7 @@
 
 #include "Client/Backoff.h"
 #include "Client/LeaderRPC.h"
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/Util.h"
 #include "Protocol/Common.h"
 #include "RPC/ClientSession.h"

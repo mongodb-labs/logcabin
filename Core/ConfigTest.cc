@@ -19,7 +19,7 @@
 
 #include <gtest/gtest.h>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/Config.h"
 #include "Storage/FilesystemUtil.h"
 

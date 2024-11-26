@@ -15,7 +15,7 @@
 
 #include <gtest/gtest.h>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/ProtoBuf.h"
 #include "build/Core/ProtoBufTest.pb.h"
 

@@ -20,7 +20,7 @@
 #include <sys/time.h>
 
 #include "build/Protocol/Raft.pb.h"
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/ProtoBuf.h"
 #include "Core/StringUtil.h"
 #include "Core/STLUtil.h"
@@ -950,4 +950,3 @@ TEST_F(ServerStateMachineTest, takeSnapshot)
 } // namespace LogCabin::Server::<anonymous>
 } // namespace LogCabin::Server
 } // namespace LogCabin
-

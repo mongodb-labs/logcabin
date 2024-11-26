@@ -17,7 +17,7 @@
 #include <functional>
 #include <mutex>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 
 #ifndef LOGCABIN_CORE_MUTEX_H
 #define LOGCABIN_CORE_MUTEX_H

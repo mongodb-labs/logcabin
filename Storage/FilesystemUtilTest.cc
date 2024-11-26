@@ -24,7 +24,7 @@
 #include <string>
 #include <vector>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/STLUtil.h"
 #include "Storage/FilesystemUtil.h"
 

@@ -18,7 +18,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/Mutex.h"
 #include "Core/ProtoBuf.h"
 #include "Core/Random.h"

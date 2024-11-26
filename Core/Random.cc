@@ -29,7 +29,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/Random.h"
 
 namespace LogCabin {

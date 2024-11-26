@@ -16,7 +16,7 @@
 #include <unistd.h>
 
 #include "build/Protocol/ServerControl.pb.h"
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "RPC/ServerRPC.h"
 #include "Server/ControlService.h"
 #include "Server/Globals.h"

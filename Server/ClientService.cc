@@ -18,6 +18,7 @@
 
 #include "build/Protocol/Client.pb.h"
 #include "Core/Buffer.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/ProtoBuf.h"
 #include "Core/Time.h"
 #include "RPC/ServerRPC.h"

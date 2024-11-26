@@ -24,7 +24,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/Endian.h"
 #include "Event/Loop.h"
 #include "RPC/MessageSocket.h"

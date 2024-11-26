@@ -15,7 +15,7 @@
 
 #include <gtest/gtest.h>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "RPC/OpaqueClientRPC.h"
 
 namespace LogCabin {

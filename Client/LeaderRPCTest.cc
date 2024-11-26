@@ -19,7 +19,7 @@
 
 #include "Client/Backoff.h"
 #include "Client/LeaderRPC.h"
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/ProtoBuf.h"
 #include "Event/Loop.h"
 #include "Protocol/Common.h"

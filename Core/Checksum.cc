@@ -29,7 +29,7 @@
 #include <cryptopp/tiger.h>
 #include <cryptopp/ripemd.h>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/Checksum.h"
 #include "Core/STLUtil.h"
 #include "Core/StringUtil.h"

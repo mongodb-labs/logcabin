@@ -16,7 +16,7 @@
 #include <gtest/gtest.h>
 #include <signal.h>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Event/Loop.h"
 #include "Event/Signal.h"
 

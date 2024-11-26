@@ -25,7 +25,7 @@
 #include "build/Server/SnapshotMetadata.pb.h"
 #include "build/Server/SnapshotStateMachine.pb.h"
 #include "Core/Config.h"
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/ProtoBuf.h"
 #include "Core/StringUtil.h"
 #include "Core/ThreadId.h"

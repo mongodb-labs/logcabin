@@ -18,7 +18,7 @@
 #include <sys/stat.h>
 #include <unordered_map>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/STLUtil.h"
 #include "Core/Util.h"
 #include "Storage/FilesystemUtil.h"
@@ -235,4 +235,3 @@ TEST_F(CoreDebugTest, logPolicyToString) {
 } // namespace LogCabin::Core::Debug
 } // namespace LogCabin::Core
 } // namespace LogCabin
-

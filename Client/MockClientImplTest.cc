@@ -20,7 +20,7 @@
 
 #include "Client/ClientImpl.h"
 #include "Client/LeaderRPCMock.h"
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/ProtoBuf.h"
 #include "Core/StringUtil.h"
 #include "build/Protocol/Client.pb.h"

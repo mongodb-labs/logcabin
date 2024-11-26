@@ -20,7 +20,7 @@
 #include <iostream>
 #include <string>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/StringUtil.h"
 #include "Core/ThreadId.h"
 #include "Core/Util.h"

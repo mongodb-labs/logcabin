@@ -21,7 +21,7 @@
 #include <functional>
 #include <stdexcept>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/Time.h"
 
 namespace LogCabin {

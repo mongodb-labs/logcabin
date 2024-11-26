@@ -16,7 +16,7 @@
 
 #include <algorithm>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Client/ClientImpl.h"
 #include "Core/ProtoBuf.h"
 #include "Core/StringUtil.h"

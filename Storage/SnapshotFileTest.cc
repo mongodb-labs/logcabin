@@ -19,7 +19,7 @@
 #include <sys/stat.h>
 
 #include "build/Core/ProtoBufTest.pb.h"
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/StringUtil.h"
 #include "Core/STLUtil.h"
 #include "Storage/FilesystemUtil.h"

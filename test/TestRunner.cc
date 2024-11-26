@@ -18,7 +18,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Storage/FilesystemUtil.h"
 
 namespace {

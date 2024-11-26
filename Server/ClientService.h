@@ -18,7 +18,7 @@
 
 #include "build/Protocol/Client.pb.h"
 #include "build/Protocol/Raft.pb.h"
-#include "Core/Debug.h"
+#include "include/LogCabin/Debug.h"
 #include "Core/ProtoBuf.h"
 #include "RPC/ClientRPC.h"
 #include "Protocol/Common.h"
