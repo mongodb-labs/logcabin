@@ -1176,6 +1176,14 @@ std::pair<RaftConsensus::ClientResult, uint64_t>
 RaftConsensus::getLastCommitIndex() const
 {
     std::unique_lock<Mutex> lockGuard(mutex);
+    if (exiting || state != State::LEADER)
+        return {ClientResult::NOT_LEADER, 0};
+
+    if (!globals.config.read<bool>("quorumCheckOnRead", true))
+    {
+        return {ClientResult::SUCCESS, commitIndex};
+    }
+
     if (!upToDateLeader(lockGuard))
         return {ClientResult::NOT_LEADER, 0};
     else
@@ -2156,7 +2164,15 @@ RaftConsensus::stepDownThreadMain()
                 break;
             if (configuration->quorumMin(&Server::getLastAckEpoch) >= epoch)
                 break;
-            if (Clock::now() >= stepDownAt) {
+            // HACK: don't stepDown due to timeout if a fake partition is
+            // enabled, this makes it easier to test a two-primaries scenario,
+            // which is otherwise rare.
+            if (globals.isPartitioned)
+            {
+                stepDownAt = Clock::now() + ELECTION_TIMEOUT;
+            }
+            else if (Clock::now() >= stepDownAt)
+            {
                 NOTICE("No broadcast for a timeout, stepping down from leader "
                        "of term %lu (converting to follower in term %lu)",
                        currentTerm, currentTerm + 1);
@@ -2288,10 +2304,19 @@ RaftConsensus::appendEntries(std::unique_lock<Mutex>& lockGuard,
     Protocol::Raft::AppendEntries::Response response;
     TimePoint start = Clock::now();
     uint64_t epoch = currentEpoch;
-    Peer::CallStatus status = peer.callRPC(
+    Peer::CallStatus status;
+    if (!globals.isPartitioned)
+    {
+        status = peer.callRPC(
                 Protocol::Raft::OpCode::APPEND_ENTRIES,
                 request, response,
                 lockGuard);
+    }
+    else
+    {
+        NOTICE("Blocking message to %lu", peer.serverId);
+        status = Peer::CallStatus::FAILED;
+    }
     switch (status) {
         case Peer::CallStatus::OK:
             break;
@@ -2427,10 +2452,19 @@ RaftConsensus::installSnapshot(std::unique_lock<Mutex>& lockGuard,
     Protocol::Raft::InstallSnapshot::Response response;
     TimePoint start = Clock::now();
     uint64_t epoch = currentEpoch;
-    Peer::CallStatus status = peer.callRPC(
+    Peer::CallStatus status;
+    if (!globals.isPartitioned)
+    {
+        status = peer.callRPC(
                 Protocol::Raft::OpCode::INSTALL_SNAPSHOT,
                 request, response,
                 lockGuard);
+    }
+    else
+    {
+        NOTICE("Blocking message to %lu", peer.serverId);
+        status = Peer::CallStatus::FAILED;
+    }
     switch (status) {
         case Peer::CallStatus::OK:
             break;
@@ -2771,10 +2805,19 @@ RaftConsensus::requestVote(std::unique_lock<Mutex>& lockGuard, Peer& peer)
     VERBOSE("requestVote start");
     TimePoint start = Clock::now();
     uint64_t epoch = currentEpoch;
-    Peer::CallStatus status = peer.callRPC(
+    Peer::CallStatus status;
+    if (!globals.isPartitioned)
+    {
+        status = peer.callRPC(
                 Protocol::Raft::OpCode::REQUEST_VOTE,
                 request, response,
                 lockGuard);
+    }
+    else
+    {
+        NOTICE("Blocking message to %lu", peer.serverId);
+        status = Peer::CallStatus::FAILED;
+    }
     VERBOSE("requestVote done");
     switch (status) {
         case Peer::CallStatus::OK:

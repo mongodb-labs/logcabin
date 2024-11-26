@@ -642,6 +642,22 @@ Cluster::getServerStatsEx(const std::string& host,
     return stats;
 }
 
+Result
+Cluster::debugMakePartition(const std::string &host,
+                            uint64_t timeoutNanoseconds,
+                            bool makePartition)
+{
+    Protocol::ServerControl::DebugMakeNetworkPartition::Request request;
+    Protocol::ServerControl::DebugMakeNetworkPartition::Response response;
+    request.set_makepartition(makePartition);
+    return clientImpl->serverControl(
+        host,
+        ClientImpl::absTimeout(timeoutNanoseconds),
+        Protocol::ServerControl::OpCode::DEBUG_MAKE_NETWORK_PARTITION,
+        request,
+        response);
+}
+
 Tree
 Cluster::getTree()
 {

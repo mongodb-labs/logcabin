@@ -38,6 +38,13 @@ RaftService::handleRPC(RPC::ServerRPC rpc)
 {
     using Protocol::Raft::OpCode;
 
+    if (globals.isPartitioned)
+    {
+        NOTICE("Rejecting incoming %s", OpCode_Name(static_cast<OpCode>(rpc.getOpCode())).c_str());
+        rpc.closeSession();
+        return;
+    }
+
     // Call the appropriate RPC handler based on the request's opCode.
     switch (rpc.getOpCode()) {
         case OpCode::APPEND_ENTRIES:
@@ -79,8 +86,8 @@ void
 RaftService::appendEntries(RPC::ServerRPC rpc)
 {
     PRELUDE(AppendEntries);
-    //VERBOSE("AppendEntries:\n%s",
-    //        Core::ProtoBuf::dumpString(request).c_str());
+    NOTICE("AppendEntries:\n%s",
+           Core::ProtoBuf::dumpString(request).c_str());
     globals.raft->handleAppendEntries(request, response);
     rpc.reply(response);
 }

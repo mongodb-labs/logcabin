@@ -21,11 +21,15 @@
 #include <cstdlib>
 #include <getopt.h>
 #include <iostream>
+#include <limits>
+#include <string>
+#include <sstream>
 #include <thread>
 
 #include <google/protobuf/stubs/common.h>
 #include <LogCabin/Client.h>
 #include <LogCabin/Debug.h>
+#include "build/Protocol/ServerStats.pb.h"
 
 namespace
 {
@@ -42,7 +46,7 @@ namespace
     {
     public:
         OptionParser(int &argc, char **&argv)
-            : argc(argc), argv(argv), cluster("logcabin:5254"), logPolicy("")
+            : argc(argc), argv(argv), cluster("logcabin:5254")
         {
             while (true)
             {
@@ -50,7 +54,6 @@ namespace
                     {"cluster", required_argument, NULL, 'c'},
                     {"help", no_argument, NULL, 'h'},
                     {"verbose", no_argument, NULL, 'v'},
-                    {"verbosity", required_argument, NULL, 256},
                     {0, 0, 0, 0}};
                 int c = getopt_long(argc, argv, "c:hmv", longOptions, NULL);
 
@@ -66,12 +69,6 @@ namespace
                 case 'h':
                     usage();
                     exit(0);
-                case 'v':
-                    logPolicy = "VERBOSE";
-                    break;
-                case 256:
-                    logPolicy = optarg;
-                    break;
                 case '?':
                 default:
                     // getopt_long already printed an error message.
@@ -114,14 +111,6 @@ namespace
                 << "Print this usage information"
                 << std::endl
 
-                << "  -v, --verbose                  "
-                << "Same as --verbosity=VERBOSE"
-                << std::endl
-
-                << "  --verbosity=<policy>           "
-                << "Set which log messages are shown."
-                << std::endl
-                << "                                 "
                 << "Comma-separated LEVEL or PATTERN@LEVEL rules."
                 << std::endl
                 << "                                 "
@@ -138,10 +127,108 @@ namespace
         int &argc;
         char **&argv;
         std::string cluster;
-        std::string logPolicy;
     };
 
 } // anonymous namespace
+
+void executeCommand(const std::string &) {}
+
+std::vector<std::pair<std::string, std::string>> parseHostPortList(const std::string &input)
+{
+    std::vector<std::pair<std::string, std::string>> result;
+    std::istringstream stream(input);
+    std::string item;
+
+    // Split the input by commas
+    while (std::getline(stream, item, ','))
+    {
+        auto colonPos = item.find(':');
+        if (colonPos != std::string::npos)
+        {
+            // Extract host and port from the pair
+            std::string host = item.substr(0, colonPos);
+            std::string port = item.substr(colonPos + 1);
+            result.emplace_back(host, port);
+        }
+        else
+        {
+            // Handle case where no colon is found
+            PANIC("Invalid format: %s", item.c_str());
+        }
+    }
+
+    return result;
+}
+
+std::string joinHostPortList(std::vector<std::pair<std::string, std::string>> hosts)
+{
+    std::ostringstream oss;
+    for (size_t i = 0; i < hosts.size(); ++i)
+    {
+        oss << hosts[i].first << ":" << hosts[i].second;
+        if (i != hosts.size() - 1)
+        {
+            oss << ",";
+        }
+    }
+
+    return oss.str();
+}
+
+void setupLatency(const std::string &cluster)
+{
+    NOTICE("Setting up artificial network latency...");
+
+    auto hosts = parseHostPortList(cluster);
+    for (const auto &hostPort : hosts)
+    {
+        const auto port = hostPort.second;
+        executeCommand("sudo nft add rule inet logcabin_test input tcp dport " + port + " limit rate 100 bytes/second");
+        executeCommand("sudo nft add rule inet logcabin_test output tcp sport " + port + " limit rate 100 bytes/second");
+    }
+
+    NOTICE("Artificial latency setup complete.");
+}
+
+void partitionServer(Cluster &cluster, const std::string &clusterStr, const std::string &port)
+{
+    NOTICE("Blocking process on port %s from communicating with peers", port.c_str());
+    // Can't use nft for this, it would block client messages as well as intra-server messages.
+    auto targetHostPort = std::string{"localhost:"} + port;
+    cluster.debugMakePartition(targetHostPort,
+                               /* timeout = 2s */ 2000000000000UL,
+                               true);
+
+    NOTICE("Process on port %s blocked from communicating with others.", port.c_str());
+}
+
+void cleanup()
+{
+    NOTICE("Cleaning up nftables rules...");
+    executeCommand("sudo nft flush table inet logcabin_test");
+    executeCommand("sudo nft delete table inet logcabin_test");
+    NOTICE("Cleanup complete.");
+}
+
+std::string leaderPort(Cluster &cluster, const std::string &clusterStr)
+{
+    auto hosts = parseHostPortList(clusterStr);
+    std::string leaderHostPort;
+    for (const auto &hostPort : hosts)
+    {
+        auto hostPortStr = hostPort.first + ":" + hostPort.second;
+        LogCabin::Protocol::ServerStats stats = cluster.getServerStatsEx(
+            hostPortStr,
+            /* timeout = 2s */ 2000000000000UL);
+
+        if (stats.raft().state() == LogCabin::Protocol::ServerStats_Raft::LEADER)
+        {
+            return hostPort.second;
+        }
+    }
+
+    return "";
+}
 
 int main(int argc, char **argv)
 {
@@ -149,36 +236,75 @@ int main(int argc, char **argv)
     {
 
         atexit(google::protobuf::ShutdownProtobufLibrary);
+        atexit(cleanup);
         OptionParser options(argc, argv);
         LogCabin::Client::Debug::setLogPolicy(
             LogCabin::Client::Debug::logPolicyFromString(
-                options.logPolicy));
+                "NOTICE"));
 
-        for (int i = 0; i < 10; ++i)
+        setupLatency(options.cluster);
+
+        // Don't let the Cluster cache the leader identity between the write
+        // and read, we want it to be possible to accidentally write to a
+        // leader in a newer term and read from a leader in an older term.
+        std::string oldLeaderPort;
         {
-            // Don't let the Cluster cache the leader identity between the write
-            // and read, we want it to be possible to accidentally write to a
-            // leader in a newer term and read from a leader in an older term.
+            Cluster cluster1(options.cluster);
+            oldLeaderPort = leaderPort(cluster1, options.cluster);
+            NOTICE("Found leader on port %s", oldLeaderPort.c_str());
+            partitionServer(cluster1, options.cluster, oldLeaderPort);
+        }
+
+        auto hosts = parseHostPortList(options.cluster);
+        hosts.erase(
+            std::remove_if(hosts.begin(), hosts.end(), [&](const std::pair<std::string, std::string> &elem)
+                           { return elem.second == oldLeaderPort; }),
+            hosts.end());
+
+        auto cluster2str = joinHostPortList(hosts);
+        NOTICE("Remaining hosts: %s", cluster2str.c_str());
+
+        {
+            Cluster cluster2(cluster2str);
+
+            // Wait for new leader.
+            while (true)
             {
-                Cluster cluster(options.cluster);
-                Tree tree = cluster.getTree();
-                tree.makeDirectoryEx("/ConsistencyTest");
-                tree.writeEx("/ConsistencyTest/test", std::to_string(i));
-            }
-            {
-                Cluster cluster(options.cluster);
-                Tree tree = cluster.getTree();
-                std::string contents = tree.readEx("/ConsistencyTest/test");
-                assert(contents == std::to_string(i));
+                auto newLeaderPort = leaderPort(cluster2, cluster2str);
+                if (!newLeaderPort.empty())
+                {
+                    NOTICE("Found NEW leader on port %s", newLeaderPort.c_str());
+                    break;
+                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
+
+            auto tree2 = cluster2.getTree();
+            tree2.makeDirectoryEx("/ConsistencyTest");
+            NOTICE("Writing foobar");
+            tree2.writeEx("/ConsistencyTest/test", "foobar");
+        }
+
+        NOTICE("Reconnect to old leader");
+        Cluster cluster3(std::string{"localhost:"} + oldLeaderPort);
+        NOTICE("Verifying old leader is still leader");
+        auto leaderPort3 = leaderPort(cluster3, std::string{"localhost:"} + oldLeaderPort);
+        if (leaderPort3 != oldLeaderPort)
+        {
+            NOTICE("Old leader is no longer leader, now it's %s", leaderPort3.c_str());
+            exit(2);
+        }
+        NOTICE("Reading from old leader");
+        std::string contents = cluster3.getTree().readEx("/ConsistencyTest/test");
+        NOTICE("Read %s", contents.c_str());
+        if (contents != "foobar")
+        {
+            NOTICE("Consistency violation, %s != foobar", contents.c_str());
         }
     }
     catch (const LogCabin::Client::Exception &e)
     {
-        std::cerr << "Exiting due to LogCabin::Client::Exception: "
-                  << e.what()
-                  << std::endl;
+        WARNING("Exiting due to LogCabin::Client::Exception: %s", e.what());
         exit(1);
     }
 }

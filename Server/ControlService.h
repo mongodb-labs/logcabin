@@ -57,6 +57,7 @@ class ControlService : public RPC::Service {
     void debugPolicyGet(RPC::ServerRPC rpc);
     void debugPolicySet(RPC::ServerRPC rpc);
     void debugRotate(RPC::ServerRPC rpc);
+    void debugMakeNetworkPartition(RPC::ServerRPC rpc);
     void serverInfoGet(RPC::ServerRPC rpc);
     void serverStatsDump(RPC::ServerRPC rpc);
     void serverStatsGet(RPC::ServerRPC rpc);

@@ -205,6 +205,11 @@ class Globals {
      * State machine used to process client requests.
      */
     std::shared_ptr<Server::StateMachine> stateMachine;
+    
+    /**
+     * Implement a fake network partition, disables Raft messages to/from me.
+     */
+    bool isPartitioned;
 
   private:
 

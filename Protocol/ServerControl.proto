@@ -123,9 +123,9 @@ message DebugRotate {
 message DebugMakeNetworkPartition {
     message Request {
         /**
-         * The list of servers that the recipient can't connect to.
+         * Whether to make a partition (true) or heal it (false).
          */
-        repeated uint64 server_id = 1;
+        required bool makePartition = 1;
     }
     message Response {
         /**

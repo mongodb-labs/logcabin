@@ -57,6 +57,9 @@ ControlService::handleRPC(RPC::ServerRPC rpc)
         case OpCode::DEBUG_ROTATE:
             debugRotate(std::move(rpc));
             break;
+        case OpCode::DEBUG_MAKE_NETWORK_PARTITION:
+            debugMakeNetworkPartition(std::move(rpc));
+            break;
         case OpCode::SERVER_INFO_GET:
             serverInfoGet(std::move(rpc));
             break;
@@ -148,6 +151,15 @@ ControlService::debugPolicySet(RPC::ServerRPC rpc)
     Core::Debug::setLogPolicy(
             Core::Debug::logPolicyFromString(
                 request.policy()));
+    rpc.reply(response);
+}
+
+void ControlService::debugMakeNetworkPartition(RPC::ServerRPC rpc)
+{
+    PRELUDE(DebugMakeNetworkPartition);
+    NOTICE("%s fake network partition", request.makepartition() ? "creating" : "healing");
+    // I guess and hope I don't need a mutex.
+    globals.isPartitioned = request.makepartition();
     rpc.reply(response);
 }
 

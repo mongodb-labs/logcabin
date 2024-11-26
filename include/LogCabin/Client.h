@@ -831,6 +831,14 @@ class Cluster {
                      uint64_t timeoutNanoseconds);
 
     /**
+     * Create a fake network partition.
+     */
+    Result
+    debugMakePartition(const std::string &host,
+                       uint64_t timeoutNanoseconds,
+                       bool makePartition);
+
+    /**
      * Return an object to access the hierarchical key-value store.
      * \return
      *      A Tree object with the working directory of '/'.

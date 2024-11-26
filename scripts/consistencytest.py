@@ -62,7 +62,9 @@ def main():
                 f.write('serverId = %d\n' % server_id)
                 f.write('listenAddresses = localhost:%d\n' % port)
                 f.write('clusterUUID = %s\n' % cluster_uuid)
-                f.write('snapshotMinLogSize = 1024')
+                f.write('logPolicy = VERBOSE\n')
+                f.write('snapshotMinLogSize = 1024\n')
+                f.write('quorumCheckOnRead = false')
                 f.write('\n\n')
                 try:
                     f.write(open('consistencytest.conf').read())
@@ -91,13 +93,10 @@ def main():
             ' '.join(['localhost:%s' % port 
                       for server_id, port in server_ids_and_ports])))
         
-        time.sleep(5)
-        
         print('Starting %s %s on localhost' % (client_command, cluster))
         client = sandbox.rsh('localhost',
-                             '%s -v %s' % (client_command, cluster),
-                             bg=True,
-                             stderr=open('debug/client', 'w'))
+                             '%s %s' % (client_command, cluster),
+                             bg=True)
 
         start = time.time()
         while client.proc.returncode is None:
