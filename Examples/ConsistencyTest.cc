@@ -251,7 +251,11 @@ int main(int argc, char **argv)
         {
             Cluster cluster1(options.cluster);
             oldLeaderPort = leaderPort(cluster1, options.cluster);
-            NOTICE("Found leader on port %s", oldLeaderPort.c_str());
+            NOTICE("Found leader on port %s, creating test file with 'foo'",
+                oldLeaderPort.c_str());
+            auto tree1 = cluster1.getTree();
+            tree1.makeDirectoryEx("/ConsistencyTest");
+            tree1.writeEx("/ConsistencyTest/test", "foo");
             partitionServer(cluster1, options.cluster, oldLeaderPort);
         }
 
@@ -280,9 +284,8 @@ int main(int argc, char **argv)
             }
 
             auto tree2 = cluster2.getTree();
-            tree2.makeDirectoryEx("/ConsistencyTest");
-            NOTICE("Writing foobar");
-            tree2.writeEx("/ConsistencyTest/test", "foobar");
+            NOTICE("Writing bar");
+            tree2.writeEx("/ConsistencyTest/test", "bar");
         }
 
         NOTICE("Reconnect to old leader");
@@ -297,9 +300,9 @@ int main(int argc, char **argv)
         NOTICE("Reading from old leader");
         std::string contents = cluster3.getTree().readEx("/ConsistencyTest/test");
         NOTICE("Read %s", contents.c_str());
-        if (contents != "foobar")
+        if (contents != "bar")
         {
-            NOTICE("Consistency violation, %s != foobar", contents.c_str());
+            NOTICE("Consistency violation, %s != bar", contents.c_str());
         }
     }
     catch (const LogCabin::Client::Exception &e)

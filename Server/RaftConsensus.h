@@ -956,6 +956,11 @@ class RaftConsensus {
          */
         uint64_t clusterTime;
 
+        /**
+         * Leader's local time when leader created entry/snapshot.
+         */
+        uint64_t localTime;
+
         // copy and assign not allowed
         Entry(const Entry&) = delete;
         Entry& operator=(const Entry&) = delete;
@@ -1399,6 +1404,13 @@ class RaftConsensus {
      * will return to the follower state after that time.
      */
     bool upToDateLeader(std::unique_lock<Mutex>& lockGuard) const;
+    
+    /**
+     * Local time we can safely read and advance the commitIndex without 
+     * restriction.
+     * TODO: add epsilon.
+     */
+    Core::Time::SystemClock::time_point leaderLeaseStart() const;
 
     /**
      * Print out a ClientResult for debugging purposes.
@@ -1416,6 +1428,12 @@ class RaftConsensus {
      * candidate and starting a new election.
      */
     const std::chrono::nanoseconds ELECTION_TIMEOUT;
+
+    /**
+     * The lease timeout, named delta for consistency with the Davis/Demirbas
+     * paper.
+     */
+    const std::chrono::nanoseconds DELTA;
 
     /**
      * A leader sends RPCs at least this often, even if there is no data to
@@ -1597,6 +1615,12 @@ class RaftConsensus {
     uint64_t lastSnapshotClusterTime;
 
     /**
+     * The local time of the last entry covered by the latest good snapshot,
+     * or 0 if we have no snapshot.
+     */
+    uint64_t lastSnapshotLocalTime;
+
+    /**
      * The size of the latest good snapshot in bytes, or 0 if we have no
      * snapshot.
      */
@@ -1696,7 +1720,7 @@ class RaftConsensus {
 
     /**
      * The thread that executes timerThreadMain() to begin new elections
-     * after periods of inactivity.
+     * or advance commitIndex after periods of inactivity.
      */
     std::thread timerThread;
 

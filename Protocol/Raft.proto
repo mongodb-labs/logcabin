@@ -126,6 +126,11 @@ message Entry {
      * sessions. See ClusterClock for more details.
     */
     required uint64 cluster_time = 6;
+    
+    /**
+     * Local clock time of the leader when it made this entry, in nanoseconds.
+     */
+    required uint64 local_time = 7;
 
     /**
      * See EntryType.

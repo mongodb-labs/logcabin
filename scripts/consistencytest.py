@@ -64,8 +64,8 @@ def main():
                 f.write('clusterUUID = %s\n' % cluster_uuid)
                 f.write('logPolicy = VERBOSE\n')
                 f.write('snapshotMinLogSize = 1024\n')
-                f.write('quorumCheckOnRead = false')
-                f.write('\n\n')
+                f.write('quorumCheckOnRead = false\n')
+                f.write('delta = 5000\n')
                 try:
                     f.write(open('consistencytest.conf').read())
                 except:
