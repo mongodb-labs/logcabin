@@ -124,14 +124,14 @@ class Sandbox(object):
                                                  '%s/killpid' % scripts_path,
                                                  p.sonce]))
             for killer in killers:
-                killer.wait()
+                killer.wait(timeout=1)
         # a half-assed attempt to clean up zombies
         for p in self.processes:
             try:
                 p.proc.kill()
             except:
                 pass
-            p.proc.wait()
+            p.proc.wait(timeout=1)
 
     def checkFailures(self):
         """Raise exception if any process has exited with a non-zero status."""

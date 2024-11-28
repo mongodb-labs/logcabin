@@ -8,6 +8,6 @@ done
 rm -f $pidfile
 kill $pid 2>/dev/null || exit 0
 while true; do
-    sleep .01
-    kill $pid 2>/dev/null || exit 0
+    sleep .1
+    kill -9 $pid 2>/dev/null || exit 0
 done
