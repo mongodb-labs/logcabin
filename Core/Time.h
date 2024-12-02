@@ -16,6 +16,7 @@
 
 #include <cassert>
 #include <chrono>
+#include <iomanip>
 #include <iostream>
 #include <time.h>
 
@@ -344,6 +345,30 @@ operator<<(std::ostream& os,
 
     struct timespec ts = LogCabin::Core::Time::makeTimeSpec(timePoint);
     return os << format("%ld.%09ld", ts.tv_sec, ts.tv_nsec);
+}
+
+template <typename TimePoint_>
+std::string timePointToString(TimePoint_ tp) {
+    using namespace std::chrono;
+
+    // Convert time_point to nanoseconds since epoch
+    auto nanos_since_epoch = tp.time_since_epoch().count();
+
+    // Convert to seconds and nanoseconds
+    auto seconds_since_epoch = nanos_since_epoch / 1000000000UL;
+    auto nanoseconds = nanos_since_epoch % 1000000000UL;
+
+    // Convert seconds to a time_t (system clock time)
+    std::time_t time = seconds_since_epoch;
+
+    // Format the time to a readable format
+    std::tm tm = *std::gmtime(&time); // Or std::localtime(&time) for local time
+
+    std::ostringstream oss;
+    oss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S") << '.'
+        << std::setw(9) << std::setfill('0') << nanoseconds;
+
+    return oss.str();
 }
 
 } // namespace std

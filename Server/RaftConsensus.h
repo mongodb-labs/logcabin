@@ -960,6 +960,11 @@ class RaftConsensus {
          * Leader's local time when leader created entry/snapshot.
          */
         uint64_t localTime;
+        
+        /**
+         * The term of the leader that created this entry.
+         */
+        uint64_t term;
 
         // copy and assign not allowed
         Entry(const Entry&) = delete;
@@ -1160,6 +1165,22 @@ class RaftConsensus {
      * Add information about the consensus state to the given structure.
      */
     void updateServerStats(Protocol::ServerStats& serverStats) const;
+    
+    /**
+     * The leader's term, or 0 if not leader.
+     */
+    uint64_t getCurrentTerm() const {
+        std::lock_guard<Mutex> lockGuard(mutex);
+        if (state != State::LEADER)
+            return 0;
+        return currentTerm;
+    }
+
+    /**
+     * The lease timeout, named delta for consistency with the Davis/Demirbas
+     * paper.
+     */
+    const std::chrono::nanoseconds DELTA;
 
     /**
      * Print out the contents of this class for debugging purposes.
@@ -1428,12 +1449,6 @@ class RaftConsensus {
      * candidate and starting a new election.
      */
     const std::chrono::nanoseconds ELECTION_TIMEOUT;
-
-    /**
-     * The lease timeout, named delta for consistency with the Davis/Demirbas
-     * paper.
-     */
-    const std::chrono::nanoseconds DELTA;
 
     /**
      * A leader sends RPCs at least this often, even if there is no data to

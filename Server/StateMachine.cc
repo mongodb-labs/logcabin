@@ -22,6 +22,7 @@
 #include "Core/Mutex.h"
 #include "Core/ProtoBuf.h"
 #include "Core/Random.h"
+#include "Core/StringUtil.h"
 #include "Core/ThreadId.h"
 #include "Core/Util.h"
 #include "Server/Globals.h"
@@ -73,6 +74,8 @@ StateMachine::StateMachine(std::shared_ptr<RaftConsensus> consensus,
     , exiting(false)
     , childPid(0)
     , lastApplied(0)
+    , lastAppliedLocalTime()
+    , lastAppliedTerm(0)
     , lastUnknownRequestMessage(TimePoint::min())
     , numUnknownRequests(0)
     , numUnknownRequestsSinceLastMessage(0)
@@ -91,6 +94,7 @@ StateMachine::StateMachine(std::shared_ptr<RaftConsensus> consensus,
     , applyThread()
     , snapshotThread()
     , snapshotWatchdogThread()
+    , limboPaths()
 {
     versionHistory.insert({0, 1});
     consensus->setSupportedStateMachineVersions(MIN_SUPPORTED_VERSION,
@@ -121,15 +125,62 @@ bool
 StateMachine::query(const Query::Request& request,
                     Query::Response& response) const
 {
-    std::lock_guard<Core::Mutex> lockGuard(mutex);
-    if (request.has_tree()) {
-        Tree::ProtoBuf::readOnlyTreeRPC(tree,
-                                        request.tree(),
-                                        *response.mutable_tree());
-        return true;
+    std::unique_lock<Core::Mutex> lockGuard(mutex);
+    if (!request.has_tree())
+    {
+        warnUnknownRequest(request, "does not understand the given request");
+        return false;
     }
-    warnUnknownRequest(request, "does not understand the given request");
-    return false;
+
+    std::string path;
+    if (request.tree().has_condition())
+    {
+        path = request.tree().condition().path();
+    }
+    else if (request.tree().has_list_directory())
+    {
+        path = request.tree().list_directory().path();
+    }
+    else if (request.tree().has_read())
+    {
+        path = request.tree().read().path();
+    }
+
+    const auto localTime = Core::Time::SystemClock::now();
+    NOTICE("delta %s now %s lastAppliedLocalTime %s, diff %s, path '%s' %s limbo region",
+           Core::StringUtil::toString(globals.raft->DELTA).c_str(),
+           timePointToString(localTime).c_str(),
+           timePointToString(lastAppliedLocalTime).c_str(),
+           Core::StringUtil::toString(localTime - lastAppliedLocalTime).c_str(),
+           path.c_str(),
+           limboPaths.find(path) == limboPaths.end() ? "isn't in" : "is in");
+
+    const auto lastAppliedAge = localTime - lastAppliedLocalTime;
+
+    // Wait until we get a lease or can do inherited lease read.
+    while (true)
+    {
+        // TODO: epsilon
+        if (lastAppliedAge > globals.raft->DELTA)
+        {
+            WARNING("rejecting read, no lease");
+            return false;
+        }
+
+        if (lastAppliedTerm >= globals.raft->getCurrentTerm())
+            break;
+            
+        // If Raft has no entries affecting 'path' with index > lastApplied.
+        if (limboPaths.find(path) == limboPaths.end())
+            break;
+            
+        entriesApplied.wait(lockGuard);        
+    }
+
+    Tree::ProtoBuf::readOnlyTreeRPC(tree,
+                                    request.tree(),
+                                    *response.mutable_tree());
+    return true;
 }
 
 void
@@ -294,6 +345,44 @@ StateMachine::setInhibit(std::chrono::nanoseconds duration)
     snapshotSuggested.notify_all();
 }
 
+void StateMachine::setLimboRegion(
+    const std::vector<RaftConsensus::Entry> &limboRegion)
+{
+    std::lock_guard<Core::Mutex> lockGuard(mutex);
+    limboPaths.empty();
+
+    for (const auto &entry : limboRegion)
+    {
+        Command::Request command;
+        if (!Core::ProtoBuf::parse(entry.command, command))
+            PANIC("Failed to parse protobuf for entry %lu",
+                  entry.index);
+
+        if (!command.has_tree())
+            continue;
+
+        const auto &request = command.tree();
+        if (request.has_make_directory())
+        {
+            limboPaths.emplace(request.make_directory().path());
+        }
+        else if (request.has_remove_directory())
+        {
+            limboPaths.emplace(request.remove_directory().path());
+        }
+        else if (request.has_write())
+        {
+            limboPaths.emplace(request.write().path());
+        }
+        else if (request.has_remove_file())
+        {
+            limboPaths.emplace(request.remove_file().path());
+        }
+    }
+    
+    // Wake thread waiting in query(), perhaps spurious wakeup.
+    entriesApplied.notify_all();
+}
 
 ////////// StateMachine private methods //////////
 
@@ -405,6 +494,8 @@ StateMachine::applyThreadMain()
             }
             expireSessions(entry.clusterTime);
             lastApplied = entry.index;
+            lastAppliedLocalTime = Core::Time::SystemClock::now();
+            lastAppliedTerm = entry.term;
             entriesApplied.notify_all();
             if (shouldTakeSnapshot(lastApplied) &&
                 maySnapshotAt <= Clock::now()) {

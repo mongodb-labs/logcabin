@@ -17,7 +17,6 @@
 
 #include <algorithm>
 #include <fcntl.h>
-#include <iomanip>
 #include <limits>
 #include <string.h>
 #include <sys/file.h>
@@ -40,6 +39,7 @@
 #include "RPC/ServerRPC.h"
 #include "Server/RaftConsensus.h"
 #include "Server/Globals.h"
+#include "Server/StateMachine.h"
 #include "Storage/LogFactory.h"
 
 namespace LogCabin {
@@ -914,6 +914,7 @@ RaftConsensus::Entry::Entry()
     , snapshotReader()
     , clusterTime(0)
     , localTime(0)
+    , term(0)
 {
 }
 
@@ -924,6 +925,7 @@ RaftConsensus::Entry::Entry(Entry&& other)
     , snapshotReader(std::move(other.snapshotReader))
     , clusterTime(other.clusterTime)
     , localTime(other.localTime)
+    , term(other.term)
 {
 }
 
@@ -934,14 +936,14 @@ RaftConsensus::Entry::~Entry()
 ////////// RaftConsensus //////////
 
 RaftConsensus::RaftConsensus(Globals& globals)
-    : ELECTION_TIMEOUT(
+    : DELTA(std::chrono::milliseconds(
+            globals.config.read<uint64_t>(
+                "delta",
+                500)))
+    , ELECTION_TIMEOUT(
         std::chrono::milliseconds(
             globals.config.read<uint64_t>(
                 "electionTimeoutMilliseconds",
-                500)))
-    , DELTA(std::chrono::milliseconds(
-            globals.config.read<uint64_t>(
-                "delta",
                 500)))
     , HEARTBEAT_PERIOD(
         globals.config.keyExists("heartbeatPeriodMilliseconds")
@@ -1135,30 +1137,6 @@ RaftConsensus::exit()
     interruptAll();
 }
 
-template <typename TimePoint_>
-std::string timePointToString(TimePoint_ tp) {
-    using namespace std::chrono;
-
-    // Convert time_point to nanoseconds since epoch
-    auto nanos_since_epoch = tp.time_since_epoch().count();
-
-    // Convert to seconds and nanoseconds
-    auto seconds_since_epoch = nanos_since_epoch / 1000000000UL;
-    auto nanoseconds = nanos_since_epoch % 1000000000UL;
-
-    // Convert seconds to a time_t (system clock time)
-    std::time_t time = seconds_since_epoch;
-
-    // Format the time to a readable format
-    std::tm tm = *std::gmtime(&time); // Or std::localtime(&time) for local time
-
-    std::ostringstream oss;
-    oss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S") << '.'
-        << std::setw(9) << std::setfill('0') << nanoseconds;
-
-    return oss.str();
-}
-
 void setLocalTime(Log::Entry& entry) {
     auto t = Core::Time::SystemClock::now();
     NOTICE("Set entry time to %s", timePointToString(t).c_str());
@@ -1270,6 +1248,7 @@ RaftConsensus::getNextEntry(uint64_t lastIndex) const
                 entry.index = lastSnapshotIndex;
                 entry.clusterTime = lastSnapshotClusterTime;
                 entry.localTime = lastSnapshotLocalTime;
+                entry.term = lastSnapshotTerm;
             } else {
                 // not a snapshot
                 const Log::Entry& logEntry = log->getEntry(nextIndex);
@@ -1286,6 +1265,7 @@ RaftConsensus::getNextEntry(uint64_t lastIndex) const
                 }
                 entry.clusterTime = logEntry.cluster_time();
                 entry.localTime = logEntry.local_time();
+                entry.term = logEntry.term();
             }
             return entry;
         }
@@ -2272,6 +2252,7 @@ RaftConsensus::advanceCommitIndex()
     commitIndex = newCommitIndex;
     VERBOSE("New commitIndex: %lu", commitIndex);
     assert(commitIndex <= log->getLastLogIndex());
+    globals.stateMachine->setLimboRegion({});
     stateChanged.notify_all();
 
     if (state == State::LEADER && commitIndex >= configuration->id) {
@@ -2608,6 +2589,29 @@ RaftConsensus::becomeLeader()
     // matchIndex for ourselves and each follower, then append the no op.
     // Otherwise we'll set our localServer's last agree index too high.
     configuration->forEach(&Server::beginLeadership);
+
+    // The limbo region extends from commitIndex+1 to our last entry.
+    std::vector<RaftConsensus::Entry> limboRegion;
+    for (auto i = commitIndex + 1; i < log->getLastLogIndex(); ++i)
+    {
+        const auto &logEntry = log->getEntry(i);
+        assert(logEntry.term() < currentTerm);
+        if (i >= commitIndex)
+        {
+            // NOTE: this is obviously bad for performance, each command in the
+            // limbo region is copied. The limbo region is likely small....
+            RaftConsensus::Entry limboEntry;
+            const std::string &s = logEntry.data();
+            limboEntry.command = Core::Buffer(
+                memcpy(new char[s.length()], s.data(), s.length()),
+                s.length(),
+                Core::Buffer::deleteArrayFn<char>);
+
+            limboRegion.push_back(std::move(limboEntry));
+        }
+    }
+
+    globals.stateMachine->setLimboRegion(limboRegion);
 
     // Append a new entry so that commitment is not delayed indefinitely.
     // Otherwise, if the leader never gets anything to append, it will never

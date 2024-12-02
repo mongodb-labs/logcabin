@@ -143,6 +143,11 @@ class StateMachine {
      */
     void setInhibit(std::chrono::nanoseconds duration);
 
+    /**
+     * When a new leader is elected, RaftConsensus tells the state machine about
+     * the limbo region.
+     */
+    void setLimboRegion(const std::vector<RaftConsensus::Entry>& limboRegion);
 
   private:
     // forward declaration
@@ -367,6 +372,16 @@ class StateMachine {
      * 'mutex'.
      */
     uint64_t lastApplied;
+    
+    /**
+     * The last time we received a committed entry.
+     */
+    Core::Time::SystemClock::time_point lastAppliedLocalTime;
+    
+    /**
+     * The term of the last committed entry we received.
+     */
+    uint64_t lastAppliedTerm;
 
     /**
      * The time when warnUnknownRequest() last printed a debug message. Used to
@@ -526,6 +541,11 @@ class StateMachine {
      * See https://github.com/logcabin/logcabin/issues/121 for more rationale.
      */
     std::thread snapshotWatchdogThread;
+    
+    /**
+     * Paths affected by commands in the limbo region.
+     */
+    std::unordered_set<std::string> limboPaths;
 };
 
 } // namespace LogCabin::Server
