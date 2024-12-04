@@ -167,6 +167,7 @@ StateMachine::query(const Query::Request& request,
             return false;
         }
 
+        // If I committed an entry in my term, I have no limbo region.
         if (lastAppliedTerm >= globals.raft->getCurrentTerm())
             break;
             

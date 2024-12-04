@@ -2252,7 +2252,6 @@ RaftConsensus::advanceCommitIndex()
     commitIndex = newCommitIndex;
     VERBOSE("New commitIndex: %lu", commitIndex);
     assert(commitIndex <= log->getLastLogIndex());
-    globals.stateMachine->setLimboRegion({});
     stateChanged.notify_all();
 
     if (state == State::LEADER && commitIndex >= configuration->id) {
