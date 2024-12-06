@@ -74,7 +74,7 @@ StateMachine::StateMachine(std::shared_ptr<RaftConsensus> consensus,
     , exiting(false)
     , childPid(0)
     , lastApplied(0)
-    , lastAppliedLocalTime()
+    , lastAppliedTimeBounds()
     , lastAppliedTerm(0)
     , lastUnknownRequestMessage(TimePoint::min())
     , numUnknownRequests(0)
@@ -146,22 +146,22 @@ StateMachine::query(const Query::Request& request,
         path = request.tree().read().path();
     }
 
-    const auto localTime = Core::Time::SystemClock::now();
-    NOTICE("delta %s now %s lastAppliedLocalTime %s, diff %s, path '%s' %s limbo region",
-           Core::StringUtil::toString(globals.raft->DELTA).c_str(),
-           timePointToString(localTime).c_str(),
-           timePointToString(lastAppliedLocalTime).c_str(),
-           Core::StringUtil::toString(localTime - lastAppliedLocalTime).c_str(),
+    const auto localNow = Core::Time::TimeBounds::localNow();
+    const auto appliedAge = localNow.latest - lastAppliedTimeBounds.earliest;
+    NOTICE("delta %f sec now %s lastAppliedTimeBounds %s,"
+           " diff %f sec, path '%s' %s limbo region",
+           double(globals.raft->LEASE_TIMEOUT_DELTA.count()) / 1e9,
+           localNow.toString().c_str(),
+           lastAppliedTimeBounds.toString().c_str(),
+           double(appliedAge) / 1e9,
            path.c_str(),
            limboPaths.find(path) == limboPaths.end() ? "isn't in" : "is in");
-
-    const auto lastAppliedAge = localTime - lastAppliedLocalTime;
 
     // Wait until we get a lease or can do inherited lease read.
     while (true)
     {
-        // TODO: epsilon
-        if (lastAppliedAge > globals.raft->DELTA)
+        if (appliedAge 
+            > static_cast<uint64_t>(globals.raft->LEASE_TIMEOUT_DELTA.count()))
         {
             WARNING("rejecting read, no lease");
             return false;
@@ -495,7 +495,7 @@ StateMachine::applyThreadMain()
             }
             expireSessions(entry.clusterTime);
             lastApplied = entry.index;
-            lastAppliedLocalTime = Core::Time::SystemClock::now();
+            lastAppliedTimeBounds = entry.localTimeBounds;
             lastAppliedTerm = entry.term;
             entriesApplied.notify_all();
             if (shouldTakeSnapshot(lastApplied) &&

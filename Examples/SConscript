@@ -1,6 +1,6 @@
 Import('env')
 
-libs = [ "pthread", "protobuf", "rt", "cryptopp" ]
+libs = [ "pthread", "protobuf", "rt", "cryptopp", "clockbound" ]
 
 env.Default([
     env.Program("Benchmark",

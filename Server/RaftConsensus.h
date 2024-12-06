@@ -94,6 +94,8 @@ typedef LogCabin::Core::Time::SteadyClock Clock;
  */
 typedef Clock::time_point TimePoint;
 
+typedef Core::Time::TimeBounds TimeBounds;
+
 typedef Core::Mutex Mutex;
 
 /**
@@ -892,6 +894,7 @@ class RaftConsensus {
     typedef RaftConsensusInternal::Mutex Mutex;
     typedef RaftConsensusInternal::Clock Clock;
     typedef RaftConsensusInternal::TimePoint TimePoint;
+    typedef RaftConsensusInternal::TimeBounds TimeBounds;
 
     /**
      * This is returned by getNextEntry().
@@ -959,7 +962,7 @@ class RaftConsensus {
         /**
          * Leader's local time when leader created entry/snapshot.
          */
-        uint64_t localTime;
+        TimeBounds localTimeBounds;
         
         /**
          * The term of the leader that created this entry.
@@ -1180,7 +1183,7 @@ class RaftConsensus {
      * The lease timeout, named delta for consistency with the Davis/Demirbas
      * paper.
      */
-    const std::chrono::nanoseconds DELTA;
+    std::chrono::nanoseconds LEASE_TIMEOUT_DELTA;
 
     /**
      * Print out the contents of this class for debugging purposes.
@@ -1429,9 +1432,8 @@ class RaftConsensus {
     /**
      * Local time we can safely read and advance the commitIndex without 
      * restriction.
-     * TODO: add epsilon.
      */
-    Core::Time::SystemClock::time_point leaderLeaseStart() const;
+    uint64_t leaderLeaseStart() const;
 
     /**
      * Print out a ClientResult for debugging purposes.
@@ -1633,7 +1635,7 @@ class RaftConsensus {
      * The local time of the last entry covered by the latest good snapshot,
      * or 0 if we have no snapshot.
      */
-    uint64_t lastSnapshotLocalTime;
+    TimeBounds lastSnapshotLocalTimeBounds;
 
     /**
      * The size of the latest good snapshot in bytes, or 0 if we have no

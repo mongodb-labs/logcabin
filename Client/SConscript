@@ -16,5 +16,5 @@ object_files['Client'] = env.StaticObject(src)
 env.Default([
     env.Program("ServerControl",
                 (["ServerControl.cc", "#build/liblogcabin.a"]),
-                LIBS = libs),
+                LIBS = libs + [ "clockbound" ]),
 ])

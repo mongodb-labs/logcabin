@@ -913,7 +913,7 @@ RaftConsensus::Entry::Entry()
     , command()
     , snapshotReader()
     , clusterTime(0)
-    , localTime(0)
+    , localTimeBounds()
     , term(0)
 {
 }
@@ -924,7 +924,7 @@ RaftConsensus::Entry::Entry(Entry&& other)
     , command(std::move(other.command))
     , snapshotReader(std::move(other.snapshotReader))
     , clusterTime(other.clusterTime)
-    , localTime(other.localTime)
+    , localTimeBounds(other.localTimeBounds)
     , term(other.term)
 {
 }
@@ -936,7 +936,7 @@ RaftConsensus::Entry::~Entry()
 ////////// RaftConsensus //////////
 
 RaftConsensus::RaftConsensus(Globals& globals)
-    : DELTA(std::chrono::milliseconds(
+    : LEASE_TIMEOUT_DELTA(std::chrono::milliseconds(
             globals.config.read<uint64_t>(
                 "delta",
                 500)))
@@ -989,7 +989,7 @@ RaftConsensus::RaftConsensus(Globals& globals)
     , lastSnapshotIndex(0)
     , lastSnapshotTerm(0)
     , lastSnapshotClusterTime(0)
-    , lastSnapshotLocalTime(0)
+    , lastSnapshotLocalTimeBounds()
     , lastSnapshotBytes(0)
     , snapshotReader()
     , snapshotWriter()
@@ -1138,9 +1138,9 @@ RaftConsensus::exit()
 }
 
 void setLocalTime(Log::Entry& entry) {
-    auto t = Core::Time::SystemClock::now();
-    NOTICE("Set entry time to %s", timePointToString(t).c_str());
-    entry.set_local_time(std::chrono::nanoseconds(t.time_since_epoch()).count());
+    auto t = Core::Time::TimeBounds::localNow();
+    entry.set_local_time_earliest(t.earliest);
+    entry.set_local_time_latest(t.latest);
 }
 
 void
@@ -1247,7 +1247,7 @@ RaftConsensus::getNextEntry(uint64_t lastIndex) const
                 }
                 entry.index = lastSnapshotIndex;
                 entry.clusterTime = lastSnapshotClusterTime;
-                entry.localTime = lastSnapshotLocalTime;
+                entry.localTimeBounds = lastSnapshotLocalTimeBounds;
                 entry.term = lastSnapshotTerm;
             } else {
                 // not a snapshot
@@ -1264,7 +1264,7 @@ RaftConsensus::getNextEntry(uint64_t lastIndex) const
                     entry.type = Entry::SKIP;
                 }
                 entry.clusterTime = logEntry.cluster_time();
-                entry.localTime = logEntry.local_time();
+                entry.localTimeBounds = Core::Time::TimeBounds(logEntry);
                 entry.term = logEntry.term();
             }
             return entry;
@@ -1867,7 +1867,7 @@ RaftConsensus::snapshotDone(
     const Log::Entry& lastEntry = log->getEntry(lastIncludedIndex);
     lastSnapshotTerm = lastEntry.term();
     lastSnapshotClusterTime = lastEntry.cluster_time();
-    lastSnapshotLocalTime = lastEntry.local_time();
+    lastSnapshotLocalTimeBounds = TimeBounds(lastEntry);
 
     // It's easier to grab this configuration out of the manager again than to
     // carry it around after writing the header.
@@ -2092,15 +2092,32 @@ RaftConsensus::timerThreadMain()
     while (!exiting) {
         Core::Time::SteadyTimeConverter converter;
         auto localStartElectionAt = converter.convert(startElectionAt);
-        auto localNow = Core::Time::SystemClock::now();
-        if (localNow >= localStartElectionAt)
-            startNewElection();
+        uint64_t localStartElectionNanos =
+            std::chrono::nanoseconds(localStartElectionAt.time_since_epoch())
+                .count();
         advanceCommitIndex();  // No-op if lease hasn't started.
-        auto leaseStartAt = leaderLeaseStart(); // Local time.
-        auto wakeTime = leaseStartAt > localNow 
-                        ? std::min(leaseStartAt, localStartElectionAt) 
-                        : localStartElectionAt;
-        stateChanged.wait_until(lockGuard, wakeTime);
+        auto localNow = Core::Time::TimeBounds::localNow();
+        auto leaseStartAt = leaderLeaseStart();
+        if (localNow.latest >= localStartElectionNanos) { 
+            startNewElection(); 
+        }
+        auto wakeTime = leaseStartAt > localNow.earliest
+                            ? std::min(leaseStartAt, localStartElectionNanos)
+                            : localStartElectionNanos;
+        NOTICE("Now %s, startElectionAt %s, localStartElectionNanos %lu, "
+               "leaseStart %lu (%s), wakeTime %lu, timer thread waiting "
+               "for %f sec",
+               localNow.toString().c_str(),
+               Core::StringUtil::toString(startElectionAt).c_str(),
+               localStartElectionNanos,
+               leaseStartAt,
+               leaseStartAt > localNow.latest ? "future" : "past",
+               wakeTime,
+               (double(wakeTime) - double(localNow.latest)) / 1e9);
+
+        stateChanged.wait_until(lockGuard,
+                                Core::Time::SystemClock::time_point(
+                                   std::chrono::nanoseconds(wakeTime)));
     }
 }
 
@@ -2228,12 +2245,13 @@ RaftConsensus::advanceCommitIndex()
     }
 
     auto leaseStartAt = leaderLeaseStart();
-    auto localNow = Core::Time::SystemClock::now();
-    if (leaseStartAt >= localNow) {
-        NOTICE("Now %s, old leader might serve reads until %s, %s",
-            timePointToString(localNow).c_str(),
-            timePointToString(leaseStartAt).c_str(),
-            leaseStartAt > localNow ? "future" : "past");
+    auto localNow = TimeBounds::localNow();
+    if (leaseStartAt >= localNow.earliest)
+    {
+        NOTICE(
+            "Now %s, old leader might serve reads until %lu, %f sec from now",
+            localNow.toString().c_str(), leaseStartAt,
+            double(leaseStartAt - localNow.earliest) / 1e9);
         return;
     }
 
@@ -2248,7 +2266,13 @@ RaftConsensus::advanceCommitIndex()
     // At least one of these entries must also be from the current term to
     // guarantee that no server without them can be elected.
     if (log->getEntry(newCommitIndex).term() != currentTerm)
+    {
+        NOTICE("newCommitIndex %lu has term %lu, older than mine %lu",
+               newCommitIndex,
+               log->getEntry(newCommitIndex).term(),
+               currentTerm);
         return;
+    }
     commitIndex = newCommitIndex;
     VERBOSE("New commitIndex: %lu", commitIndex);
     assert(commitIndex <= log->getLastLogIndex());
@@ -3104,10 +3128,9 @@ RaftConsensus::upToDateLeader(std::unique_lock<Mutex>& lockGuard) const
     }
 }
 
-Core::Time::SystemClock::time_point
-RaftConsensus::leaderLeaseStart() const
+uint64_t RaftConsensus::leaderLeaseStart() const
 {
-    uint64_t t = 0;
+    TimeBounds t;
     for (uint64_t index = log->getLastLogIndex();
          index >= log->getLogStartIndex();
          --index)
@@ -3115,23 +3138,20 @@ RaftConsensus::leaderLeaseStart() const
         const Log::Entry &entry = log->getEntry(index);
         assert(entry.term() <= currentTerm);
         if (entry.term() < currentTerm) {
-            t = entry.local_time();
-            NOTICE("Found term %lu index %lu entry with local time %s, %s ago",
-                   entry.term(), 
-                   entry.index(),
-                   timePointToString(Core::Time::SystemClock::time_point(std::chrono::nanoseconds(t))).c_str(),
-                   Core::StringUtil::toString(Core::Time::SystemClock::now() - Core::Time::SystemClock::time_point(std::chrono::nanoseconds(t))).c_str());
+            t = TimeBounds(entry);
+            NOTICE("Found term %lu index %lu entry with local time %s",
+                   entry.term(), entry.index(), t.toString().c_str());
             // We're reverse-iterating, this is the last entry.
             break;
         }
     }
-    
-    if (t == 0 && lastSnapshotTerm < currentTerm) {
-        t = lastSnapshotLocalTime;
+
+    if (t.empty() && lastSnapshotTerm < currentTerm)
+    {
+        t = lastSnapshotLocalTimeBounds;
     }
-    
-    return Core::Time::SystemClock::time_point(
-        std::chrono::nanoseconds(t) + DELTA);
+
+    return t.latest + LEASE_TIMEOUT_DELTA.count();
 }
 
 std::ostream&

@@ -65,7 +65,7 @@ def main():
                 f.write('logPolicy = VERBOSE\n')
                 f.write('snapshotMinLogSize = 1024\n')
                 f.write('quorumCheckOnRead = false\n')
-                f.write('delta = 5000\n')
+                f.write('deltaMilliseconds = 5000\n')
                 try:
                     f.write(open('consistencytest.conf').read())
                 except:

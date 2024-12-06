@@ -245,7 +245,7 @@ daemon = env.Program("build/LogCabin",
              object_files['RPC'] +
              object_files['Event'] +
              object_files['Core']),
-            LIBS = [ "pthread", "protobuf", "rt", "cryptopp" ])
+            LIBS = [ "pthread", "protobuf", "rt", "cryptopp", "clockbound" ])
 env.Default(daemon)
 
 storageTool = env.Program("build/Storage/Tool",
@@ -258,7 +258,7 @@ storageTool = env.Program("build/Storage/Tool",
              object_files['Tree'] +
              object_files['Protocol'] +
              object_files['Core']),
-            LIBS = [ "pthread", "protobuf", "rt", "cryptopp" ])
+            LIBS = [ "pthread", "protobuf", "rt", "cryptopp", "clockbound" ])
 env.Default(storageTool)
 
 # Create empty directory so that it can be installed to /var/log/logcabin

@@ -20,7 +20,12 @@
 #include <iostream>
 #include <time.h>
 
+extern "C" {
+#include <clockbound.h>
+}
+
 #include "Core/StringUtil.h"
+#include "build/Protocol/Raft.pb.h"
 
 #ifndef LOGCABIN_CORE_TIME_H
 #define LOGCABIN_CORE_TIME_H
@@ -300,6 +305,45 @@ class SteadyTimeConverter {
     SystemClock::time_point systemNow;
 };
 
+struct TimeBounds {
+    /**
+     * The earliest local time that could be represented by this struct, nanos.
+     */
+    uint64_t earliest;
+
+    /**
+     * The latest local time that could be represented by this struct, nanos.
+     */
+    uint64_t latest;
+    
+    TimeBounds(uint64_t earliest_, uint64_t latest_)
+        : earliest(earliest_)
+        , latest(latest_)
+        {}
+        
+    TimeBounds(const Protocol::Raft::Entry &entry)
+        : earliest(entry.local_time_earliest())
+        , latest(entry.local_time_latest())
+        {}
+
+        
+    TimeBounds()
+        : earliest(0)
+        , latest(0)
+        {}
+        
+    bool empty() {
+        return earliest == 0 && latest == 0;
+    }
+  
+    static TimeBounds localNow();
+        
+    std::string toString() const;
+    
+private:
+    static clockbound_ctx* clockBoundCtx;
+    static std::mutex mutex;
+};
 } // namespace LogCabin::Core::Time
 } // namespace LogCabin::Core
 } // namespace LogCabin

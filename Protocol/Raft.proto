@@ -128,9 +128,14 @@ message Entry {
     required uint64 cluster_time = 6;
     
     /**
-     * Local clock time of the leader when it made this entry, in nanoseconds.
+     * Earliest local time of the leader when it made this entry, in nanoseconds.
      */
-    required uint64 local_time = 7;
+    required uint64 local_time_earliest = 7;
+
+    /**
+     * Latest local time of the leader when it made this entry, in nanoseconds.
+     */
+    required uint64 local_time_latest = 8;
 
     /**
      * See EntryType.

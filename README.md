@@ -55,6 +55,9 @@ Pre-requisites:
 
 In short, RHEL/CentOS 6 should work, as well as anything more recent.
 
+First build the [clock-bound](https://github.com/aws/clock-bound/) library and
+install the lib and header file in the standard locations.
+
 Get the source code:
 
     git clone git://github.com/logcabin/logcabin.git

@@ -23,6 +23,7 @@
 
 #include "include/LogCabin/Debug.h"
 #include "Core/Time.h"
+#include <mutex>
 
 namespace LogCabin {
 namespace Core {
@@ -244,6 +245,79 @@ SteadyTimeConverter::unixNanos(SteadyClock::time_point when)
     return std::chrono::nanoseconds(
         convert(when).time_since_epoch()).count();
 }
+
+namespace
+{
+    std::string clockBoundErrToString(const clockbound_err *err)
+    {
+        switch (err->kind)
+        {
+        case CLOCKBOUND_ERR_NONE:
+            return "success";
+        case CLOCKBOUND_ERR_SYSCALL:
+            if (err->detail)
+            {
+                return std::string{err->detail} + strerror(err->sys_errno);
+            }
+            else
+            {
+                return std::string{strerror(err->sys_errno)};
+            }
+        case CLOCKBOUND_ERR_SEGMENT_NOT_INITIALIZED:
+            return "Segment not initialized";
+        case CLOCKBOUND_ERR_SEGMENT_MALFORMED:
+            return "Segment malformed";
+        case CLOCKBOUND_ERR_CAUSALITY_BREACH:
+            return "Segment and clock reads out of order";
+        }
+
+        PANIC("Unhandled clockbound error %d", err->kind);
+    }
+} // anonymous namespace
+
+std::string TimeBounds::toString() const
+{
+    return std::string{"["} + std::to_string(earliest) +
+           ", " + std::to_string(latest) + "]";
+}
+
+TimeBounds TimeBounds::localNow()
+{
+    std::lock_guard<std::mutex> lock_guard(mutex);
+
+    if (clockBoundCtx == nullptr)
+    {
+        clockbound_err open_err;
+        clockBoundCtx = clockbound_open(CLOCKBOUND_SHM_DEFAULT_PATH, &open_err);
+        if (clockBoundCtx == nullptr)
+        {
+            PANIC("clockbound_open: %s",
+                  clockBoundErrToString(&open_err).c_str());
+        }
+    }
+
+    clockbound_now_result result;
+    clockbound_err const *err;
+    err = clockbound_now(clockBoundCtx, &result);
+    if (err)
+    {
+        PANIC("clockbound_now: %s", clockBoundErrToString(err).c_str());
+    }
+
+    if (result.clock_status 
+        != clockbound_clock_status::CLOCKBOUND_STA_SYNCHRONIZED)
+    {
+        PANIC("clockbound_now: clock_status=%d", result.clock_status);
+    }
+
+    return {
+        result.earliest.tv_sec * 1000000000ULL + result.earliest.tv_nsec,
+        result.latest.tv_sec * 1000000000ULL + result.latest.tv_nsec};
+}
+
+// Initialize static class members.
+clockbound_ctx* TimeBounds::clockBoundCtx = nullptr;
+std::mutex TimeBounds::mutex;
 
 } // namespace LogCabin::Core::Time
 } // namespace LogCabin::Core

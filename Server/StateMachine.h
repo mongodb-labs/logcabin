@@ -50,6 +50,7 @@ class StateMachine {
   public:
     typedef Protocol::Client::StateMachineCommand Command;
     typedef Protocol::Client::StateMachineQuery Query;
+    typedef Core::Time::TimeBounds TimeBounds;
 
     enum {
         /**
@@ -68,6 +69,9 @@ class StateMachine {
     StateMachine(std::shared_ptr<RaftConsensus> consensus,
                  Core::Config& config,
                  Globals& globals);
+                 
+    StateMachine(const StateMachine&) = delete;
+    void operator=(const StateMachine&) = delete;
     ~StateMachine();
 
     /**
@@ -376,7 +380,7 @@ class StateMachine {
     /**
      * The last time we received a committed entry.
      */
-    Core::Time::SystemClock::time_point lastAppliedLocalTime;
+    TimeBounds lastAppliedTimeBounds;
     
     /**
      * The term of the last committed entry we received.
