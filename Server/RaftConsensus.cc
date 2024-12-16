@@ -2104,16 +2104,16 @@ RaftConsensus::timerThreadMain()
         auto wakeTime = leaseStartAt > localNow.earliest
                             ? std::min(leaseStartAt, localStartElectionNanos)
                             : localStartElectionNanos;
-        NOTICE("Now %s, startElectionAt %s, localStartElectionNanos %lu, "
-               "leaseStart %lu (%s), wakeTime %lu, timer thread waiting "
-               "for %f sec",
-               localNow.toString().c_str(),
-               Core::StringUtil::toString(startElectionAt).c_str(),
-               localStartElectionNanos,
-               leaseStartAt,
-               leaseStartAt > localNow.latest ? "future" : "past",
-               wakeTime,
-               (double(wakeTime) - double(localNow.latest)) / 1e9);
+        VERBOSE("Now %s, startElectionAt %s, localStartElectionNanos %lu, "
+                "leaseStart %lu (%s), wakeTime %lu, timer thread waiting "
+                "for %f sec",
+                localNow.toString().c_str(),
+                Core::StringUtil::toString(startElectionAt).c_str(),
+                localStartElectionNanos,
+                leaseStartAt,
+                leaseStartAt > localNow.latest ? "future" : "past",
+                wakeTime,
+                (double(wakeTime) - double(localNow.latest)) / 1e9);
 
         stateChanged.wait_until(lockGuard,
                                 Core::Time::SystemClock::time_point(
@@ -2248,7 +2248,7 @@ RaftConsensus::advanceCommitIndex()
     auto localNow = TimeBounds::localNow();
     if (leaseStartAt >= localNow.earliest)
     {
-        NOTICE(
+        VERBOSE(
             "Now %s, old leader might serve reads until %lu, %f sec from now",
             localNow.toString().c_str(), leaseStartAt,
             double(leaseStartAt - localNow.earliest) / 1e9);
@@ -2267,10 +2267,10 @@ RaftConsensus::advanceCommitIndex()
     // guarantee that no server without them can be elected.
     if (log->getEntry(newCommitIndex).term() != currentTerm)
     {
-        NOTICE("newCommitIndex %lu has term %lu, older than mine %lu",
-               newCommitIndex,
-               log->getEntry(newCommitIndex).term(),
-               currentTerm);
+        VERBOSE("newCommitIndex %lu has term %lu, older than mine %lu",
+                newCommitIndex,
+                log->getEntry(newCommitIndex).term(),
+                currentTerm);
         return;
     }
     commitIndex = newCommitIndex;
@@ -2380,7 +2380,7 @@ RaftConsensus::appendEntries(std::unique_lock<Mutex>& lockGuard,
     }
     else
     {
-        NOTICE("Blocking message to %lu", peer.serverId);
+        VERBOSE("Blocking message to %lu", peer.serverId);
         status = Peer::CallStatus::FAILED;
     }
     switch (status) {
@@ -2528,7 +2528,7 @@ RaftConsensus::installSnapshot(std::unique_lock<Mutex>& lockGuard,
     }
     else
     {
-        NOTICE("Blocking message to %lu", peer.serverId);
+        VERBOSE("Blocking message to %lu", peer.serverId);
         status = Peer::CallStatus::FAILED;
     }
     switch (status) {
@@ -2906,7 +2906,7 @@ RaftConsensus::requestVote(std::unique_lock<Mutex>& lockGuard, Peer& peer)
     }
     else
     {
-        NOTICE("Blocking message to %lu", peer.serverId);
+        VERBOSE("Blocking message to %lu", peer.serverId);
         status = Peer::CallStatus::FAILED;
     }
     VERBOSE("requestVote done");
@@ -3139,8 +3139,8 @@ uint64_t RaftConsensus::leaderLeaseStart() const
         assert(entry.term() <= currentTerm);
         if (entry.term() < currentTerm) {
             t = TimeBounds(entry);
-            NOTICE("Found term %lu index %lu entry with local time %s",
-                   entry.term(), entry.index(), t.toString().c_str());
+            VERBOSE("Found term %lu index %lu entry with local time %s",
+                    entry.term(), entry.index(), t.toString().c_str());
             // We're reverse-iterating, this is the last entry.
             break;
         }
