@@ -132,38 +132,41 @@ StateMachine::query(const Query::Request& request,
         return false;
     }
 
-    std::string path;
+    std::vector<std::string> paths;
     if (request.tree().has_condition())
     {
-        path = request.tree().condition().path();
+        paths.push_back(request.tree().condition().path());
     }
-    else if (request.tree().has_list_directory())
+
+    if (request.tree().has_list_directory())
     {
-        path = request.tree().list_directory().path();
+        paths.push_back(request.tree().list_directory().path());
     }
     else if (request.tree().has_read())
     {
-        path = request.tree().read().path();
+        paths.push_back(request.tree().read().path());
     }
-
-    const auto localNow = Core::Time::TimeBounds::localNow();
-    const auto appliedAge = localNow.latest - lastAppliedTimeBounds.earliest;
-    NOTICE("delta %f sec now %s lastAppliedTimeBounds %s,"
-           " diff %f sec, path '%s' %s limbo region",
-           double(globals.raft->LEASE_TIMEOUT_DELTA.count()) / 1e9,
-           localNow.toString().c_str(),
-           lastAppliedTimeBounds.toString().c_str(),
-           double(appliedAge) / 1e9,
-           path.c_str(),
-           limboPaths.find(path) == limboPaths.end() ? "isn't in" : "is in");
 
     // Wait until we get a lease or can do inherited lease read.
     while (true)
     {
+        const auto localNow = Core::Time::TimeBounds::localNow();
+        const auto appliedAge = localNow.latest - lastAppliedTimeBounds.earliest;
+        bool isLimboRead =
+            std::any_of(paths.cbegin(), paths.cend(), [&](const std::string &p)
+                        { return limboPaths.find(p) != limboPaths.end(); });
         if (appliedAge 
             > static_cast<uint64_t>(globals.raft->LEASE_TIMEOUT_DELTA.count()))
         {
-            WARNING("rejecting read, no lease");
+            WARNING("rejecting read, no lease,"
+                    " delta %f sec now %s lastAppliedTimeBounds %s,"
+                    " diff %f sec, path '%s' %s limbo region",
+                    double(globals.raft->LEASE_TIMEOUT_DELTA.count()) / 1e9,
+                    localNow.toString().c_str(),
+                    lastAppliedTimeBounds.toString().c_str(),
+                    double(appliedAge) / 1e9,
+                    Core::StringUtil::toString(paths).c_str(),
+                    isLimboRead ? "is in" : "isn't in");
             return false;
         }
 
@@ -172,7 +175,7 @@ StateMachine::query(const Query::Request& request,
             break;
             
         // If Raft has no entries affecting 'path' with index > lastApplied.
-        if (limboPaths.find(path) == limboPaths.end())
+        if (!isLimboRead)
             break;
             
         entriesApplied.wait(lockGuard);        
