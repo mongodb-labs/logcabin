@@ -1896,7 +1896,7 @@ class CandidacyThreadMainHelper {
 // The first time through the while loop, we don't want to start a new election
 // and want to wait on the condition variable. The second time through, we want
 // to start a new election. Then we want to exit.
-TEST_F(ServerRaftConsensusTest, timerThreadMain)
+TEST_F(ServerRaftConsensusTest, startNewElectionThreadMain)
 {
     init();
     Clock::mockValue = consensus->startElectionAt - milliseconds(1);
@@ -1904,7 +1904,7 @@ TEST_F(ServerRaftConsensusTest, timerThreadMain)
     consensus->append({&entry1});
     consensus->append({&entry5});
     consensus->stateChanged.callback = CandidacyThreadMainHelper(*consensus);
-    consensus->timerThreadMain();
+    consensus->startNewElectionThreadMain();
 }
 
 // used in peerThreadMain test

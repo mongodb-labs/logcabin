@@ -1233,10 +1233,16 @@ class RaftConsensus {
     void leaderDiskThreadMain();
 
     /**
-     * Start new elections when it's time to do so. This is the method that
-     * #timerThread executes.
+     * Advance the commit index when it's time to do so. This is the method that
+     * #advanceCommitIndexThread executes.
      */
-    void timerThreadMain();
+    void advanceCommitIndexThreadMain();
+
+    /**
+     * Start new elections when it's time to do so. This is the method that
+     * #startNewElectionThread executes.
+     */
+    void startNewElectionThreadMain();
 
     /**
      * Initiate RPCs to a specific server as necessary.
@@ -1736,10 +1742,16 @@ class RaftConsensus {
     std::thread leaderDiskThread;
 
     /**
-     * The thread that executes timerThreadMain() to begin new elections
-     * or advance commitIndex after periods of inactivity.
+     * The thread that executes advanceCommitIndexThreadThreadMain() to
+     * advance commitIndex after acquiring a lease.
      */
-    std::thread timerThread;
+    std::thread advanceCommitIndexThread;
+
+    /**
+     * The thread that executes startNewElectionThreadMain() to run for
+     * election after not hearing from the leader for a while.
+     */
+    std::thread startNewElectionThread;
 
     /**
      * The thread that executes stateMachineUpdaterThreadMain() to append

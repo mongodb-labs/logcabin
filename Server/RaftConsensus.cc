@@ -1002,7 +1002,8 @@ RaftConsensus::RaftConsensus(Globals& globals)
     , withholdVotesUntil(TimePoint::min())
     , numEntriesTruncated(0)
     , leaderDiskThread()
-    , timerThread()
+    , advanceCommitIndexThread()
+    , startNewElectionThread()
     , stateMachineUpdaterThread()
     , stepDownThread()
     , invariants(*this)
@@ -1015,8 +1016,10 @@ RaftConsensus::~RaftConsensus()
         exit();
     if (leaderDiskThread.joinable())
         leaderDiskThread.join();
-    if (timerThread.joinable())
-        timerThread.join();
+    if (advanceCommitIndexThread.joinable())
+        advanceCommitIndexThread.join();
+    if (startNewElectionThread.joinable())
+        startNewElectionThread.join();
     if (stateMachineUpdaterThread.joinable())
         stateMachineUpdaterThread.join();
     if (stepDownThread.joinable())
@@ -1109,8 +1112,10 @@ RaftConsensus::init()
     if (RaftConsensusInternal::startThreads) {
         leaderDiskThread = std::thread(
             &RaftConsensus::leaderDiskThreadMain, this);
-        timerThread = std::thread(
-            &RaftConsensus::timerThreadMain, this);
+        advanceCommitIndexThread = std::thread(
+            &RaftConsensus::advanceCommitIndexThreadMain, this);
+        startNewElectionThread = std::thread(
+            &RaftConsensus::startNewElectionThreadMain, this);
         if (globals.config.read<bool>("disableStateMachineUpdates", false)) {
             NOTICE("Not starting state machine updater thread (state machine "
                    "updates are disabled in config)");
@@ -2085,39 +2090,39 @@ RaftConsensus::leaderDiskThreadMain()
 }
 
 void
-RaftConsensus::timerThreadMain()
+RaftConsensus::advanceCommitIndexThreadMain()
 {
     std::unique_lock<Mutex> lockGuard(mutex);
-    Core::ThreadId::setName("timer");
+    Core::ThreadId::setName("advanceCommitIndex");
     while (!exiting) {
-        Core::Time::SteadyTimeConverter converter;
-        auto localStartElectionAt = converter.convert(startElectionAt);
-        uint64_t localStartElectionNanos =
-            std::chrono::nanoseconds(localStartElectionAt.time_since_epoch())
-                .count();
         advanceCommitIndex();  // No-op if lease hasn't started.
         auto localNow = Core::Time::TimeBounds::localNow();
         auto leaseStartAt = leaderLeaseStart();
-        if (localNow.latest >= localStartElectionNanos) { 
-            startNewElection(); 
-        }
-        auto wakeTime = leaseStartAt > localNow.earliest
-                            ? std::min(leaseStartAt, localStartElectionNanos)
-                            : localStartElectionNanos;
-        VERBOSE("Now %s, startElectionAt %s, localStartElectionNanos %lu, "
-                "leaseStart %lu (%s), wakeTime %lu, timer thread waiting "
-                "for %f sec",
+        VERBOSE("Now %s, leaseStart %lu (%s), timer thread waiting for %f sec",
                 localNow.toString().c_str(),
-                Core::StringUtil::toString(startElectionAt).c_str(),
-                localStartElectionNanos,
                 leaseStartAt,
                 leaseStartAt > localNow.latest ? "future" : "past",
-                wakeTime,
-                (double(wakeTime) - double(localNow.latest)) / 1e9);
+                (double(leaseStartAt) - double(localNow.latest)) / 1e9);
 
-        stateChanged.wait_until(lockGuard,
-                                Core::Time::SystemClock::time_point(
-                                   std::chrono::nanoseconds(wakeTime)));
+        if (leaseStartAt > localNow.latest) {
+            stateChanged.wait_until(lockGuard,
+                                    Core::Time::SystemClock::time_point(
+                                    std::chrono::nanoseconds(leaseStartAt)));
+        } else {
+            stateChanged.wait(lockGuard);
+        }
+    }
+}
+
+void
+RaftConsensus::startNewElectionThreadMain()
+{
+    std::unique_lock<Mutex> lockGuard(mutex);
+    Core::ThreadId::setName("startNewElection");
+    while (!exiting) {
+        if (Clock::now() >= startElectionAt)
+            startNewElection();
+        stateChanged.wait_until(lockGuard, startElectionAt);
     }
 }
 
@@ -2274,7 +2279,7 @@ RaftConsensus::advanceCommitIndex()
         return;
     }
     commitIndex = newCommitIndex;
-    VERBOSE("New commitIndex: %lu", commitIndex);
+    NOTICE("New commitIndex: %lu, [%lu, %lu]", commitIndex, log->getEntry(newCommitIndex).local_time_earliest(), log->getEntry(newCommitIndex).local_time_latest());
     assert(commitIndex <= log->getLastLogIndex());
     stateChanged.notify_all();
 
@@ -3148,7 +3153,16 @@ uint64_t RaftConsensus::leaderLeaseStart() const
 
     if (t.empty() && lastSnapshotTerm < currentTerm)
     {
+        VERBOSE("Using last snapshot with local time %s",
+                lastSnapshotLocalTimeBounds.toString().c_str());
         t = lastSnapshotLocalTimeBounds;
+    }
+    
+    if (t.empty()) {
+        // No entries in past terms. I'm the leader of the first term ever.
+        assert(currentTerm <= 1);
+        VERBOSE("I'm the leader of the first term, lease starts now");
+        return 0;
     }
 
     return t.latest + LEASE_TIMEOUT_DELTA.count();
