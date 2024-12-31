@@ -166,6 +166,22 @@ endsWith(const std::string& haystack, const std::string& needle)
                              needle.length(), needle) == 0);
 }
 
+std::ostream &
+operator<<(std::ostream &os, const std::vector<std::string> &vec)
+{
+    os << "[";
+    for (size_t i = 0; i < vec.size(); ++i)
+    {
+        os << "'" << vec[i] << "'";
+        if (i < vec.size() - 1)
+        {
+            os << ", ";
+        }
+    }
+    os << "]";
+    return os;
+}
+
 std::string
 trim(const std::string& original)
 {

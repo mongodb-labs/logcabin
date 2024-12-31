@@ -107,6 +107,10 @@ bool startsWith(const std::string& haystack, const std::string& needle);
 /// Return true if haystack ends with needle.
 bool endsWith(const std::string& haystack, const std::string& needle);
 
+/// Human-readable vector of strings.
+std::ostream &
+operator<<(std::ostream &os, const std::vector<std::string> &vec);
+
 /**
  * Return a string returned from the given object's stream operator.
  * This is useful when you're dealing with strings, but the object you want to
