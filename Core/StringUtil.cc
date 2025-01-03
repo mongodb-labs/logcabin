@@ -22,6 +22,7 @@
 #include <cassert>
 #include <cctype>
 #include <cstdarg>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <locale>
