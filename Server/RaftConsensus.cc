@@ -1004,6 +1004,7 @@ RaftConsensus::RaftConsensus(Globals& globals)
     , leaderDiskThread()
     , advanceCommitIndexThread()
     , startNewElectionThread()
+    , extendLeaseThread()
     , stateMachineUpdaterThread()
     , stepDownThread()
     , invariants(*this)
@@ -1020,6 +1021,8 @@ RaftConsensus::~RaftConsensus()
         advanceCommitIndexThread.join();
     if (startNewElectionThread.joinable())
         startNewElectionThread.join();
+    if (extendLeaseThread.joinable())
+        extendLeaseThread.join();
     if (stateMachineUpdaterThread.joinable())
         stateMachineUpdaterThread.join();
     if (stepDownThread.joinable())
@@ -1116,6 +1119,8 @@ RaftConsensus::init()
             &RaftConsensus::advanceCommitIndexThreadMain, this);
         startNewElectionThread = std::thread(
             &RaftConsensus::startNewElectionThreadMain, this);
+        extendLeaseThread = std::thread(
+            &RaftConsensus::extendLeaseThreadMain, this);
         if (globals.config.read<bool>("disableStateMachineUpdates", false)) {
             NOTICE("Not starting state machine updater thread (state machine "
                    "updates are disabled in config)");
@@ -2123,6 +2128,30 @@ RaftConsensus::startNewElectionThreadMain()
         if (Clock::now() >= startElectionAt)
             startNewElection();
         stateChanged.wait_until(lockGuard, startElectionAt);
+    }
+}
+
+void
+RaftConsensus::extendLeaseThreadMain()
+{
+    std::unique_lock<Mutex> lockGuard(mutex);
+    Core::ThreadId::setName("extendLease");
+    while (!exiting) {
+        if (state == State::LEADER) {
+            Log::Entry entry;
+            entry.set_term(currentTerm);
+            entry.set_type(Protocol::Raft::EntryType::NOOP);
+            entry.set_cluster_time(clusterClock.leaderStamp());
+            setLocalTime(entry);
+            append({&entry});
+        }
+        
+        auto microseconds = static_cast<__useconds_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                LEASE_TIMEOUT_DELTA).count() / 2);
+        lockGuard.unlock();
+        usleep(microseconds);
+        lockGuard.lock();
     }
 }
 

@@ -1245,6 +1245,12 @@ class RaftConsensus {
     void startNewElectionThreadMain();
 
     /**
+     * Extend the lease when it's time to do so. This is the method that
+     * #extendLeaseThread executes.
+     */
+    void extendLeaseThreadMain();
+
+    /**
      * Initiate RPCs to a specific server as necessary.
      * One thread for each remote server calls this method (see Peer::thread).
      */
@@ -1752,6 +1758,11 @@ class RaftConsensus {
      * election after not hearing from the leader for a while.
      */
     std::thread startNewElectionThread;
+    
+    /**
+     * The thread that extends the lease by writing a NOOP entry periodically.
+     */
+    std::thread extendLeaseThread;
 
     /**
      * The thread that executes stateMachineUpdaterThreadMain() to append
