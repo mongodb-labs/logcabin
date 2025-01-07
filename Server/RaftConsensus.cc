@@ -1357,7 +1357,7 @@ RaftConsensus::handleAppendEntries(
 
     // For an entry to fit into our log, it must not leave a gap.
     if (request.prev_log_index() > log->getLastLogIndex()) {
-        VERBOSE("Rejecting AppendEntries RPC: would leave gap");
+        WARNING("Rejecting AppendEntries RPC: would leave gap");
         return; // response was set to a rejection above
     }
     // It must also agree with the previous entry in the log (and, inductively
@@ -1369,7 +1369,7 @@ RaftConsensus::handleAppendEntries(
     if (request.prev_log_index() >= log->getLogStartIndex() &&
         log->getEntry(request.prev_log_index()).term() !=
             request.prev_log_term()) {
-        VERBOSE("Rejecting AppendEntries RPC: terms don't agree");
+        WARNING("Rejecting AppendEntries RPC: terms don't agree");
         return; // response was set to a rejection above
     }
 
