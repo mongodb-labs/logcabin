@@ -994,6 +994,7 @@ RaftConsensus::RaftConsensus(Globals& globals)
     , snapshotReader()
     , snapshotWriter()
     , commitIndex(0)
+    , lastEntryInPreviousTermIndex(0)
     , leaderId(0)
     , votedFor(0)
     , currentEpoch(0)
@@ -1070,6 +1071,13 @@ RaftConsensus::init()
     if (!log) { // some unit tests pre-set the log; don't overwrite it
         log = Storage::LogFactory::makeLog(globals.config, storageLayout);
     }
+
+    if (log->metadata.has_current_term())
+        currentTerm = log->metadata.current_term();
+
+    if (log->metadata.has_voted_for())
+        votedFor = log->metadata.voted_for();
+
     for (uint64_t index = log->getLogStartIndex();
          index <= log->getLastLogIndex();
          ++index) {
@@ -1082,6 +1090,9 @@ RaftConsensus::init()
         if (entry.type() == Protocol::Raft::EntryType::CONFIGURATION) {
             configurationManager->add(index, entry.configuration());
         }
+        if (entry.term() < currentTerm) {
+            lastEntryInPreviousTermIndex = entry.index();
+        }
     }
 
     // Restore cluster time epoch from last log entry, if any
@@ -1093,10 +1104,6 @@ RaftConsensus::init()
     NOTICE("The log contains indexes %lu through %lu (inclusive)",
            log->getLogStartIndex(), log->getLastLogIndex());
 
-    if (log->metadata.has_current_term())
-        currentTerm = log->metadata.current_term();
-    if (log->metadata.has_voted_for())
-        votedFor = log->metadata.voted_for();
     updateLogMetadata();
 
     // Read snapshot after reading log, since readSnapshot() will get rid of
@@ -2272,9 +2279,6 @@ void
 RaftConsensus::advanceCommitIndex()
 {
     if (state != State::LEADER) {
-        // getMatchIndex is undefined unless we're leader
-        WARNING("advanceCommitIndex called as %s",
-                Core::StringUtil::toString(state).c_str());
         return;
     }
 
@@ -3014,12 +3018,15 @@ RaftConsensus::printElectionState() const
             s = "LEADER,   ";
             break;
     }
-    NOTICE("server=%lu, term=%lu, state=%s leader=%lu, vote=%lu",
+    NOTICE("server=%lu, term=%lu, state=%s leader=%lu, vote=%lu,"
+           " commitIndex=%lu, lastEntryInPreviousTermIndex=%lu",
            serverId,
            currentTerm,
            s,
            leaderId,
-           votedFor);
+           votedFor,
+           commitIndex,
+           lastEntryInPreviousTermIndex);
 }
 
 void
@@ -3078,6 +3085,12 @@ RaftConsensus::stepDown(uint64_t newTerm)
     if (currentTerm < newTerm) {
         VERBOSE("stepDown(%lu)", newTerm);
         currentTerm = newTerm;
+        lastEntryInPreviousTermIndex = log->getLastLogIndex();
+        if (lastEntryInPreviousTermIndex > 0)
+        {
+            assert(log->getEntry(lastEntryInPreviousTermIndex).term() <
+                   currentTerm);
+        }
         leaderId = 0;
         votedFor = 0;
         updateLogMetadata();
@@ -3165,29 +3178,19 @@ RaftConsensus::upToDateLeader(std::unique_lock<Mutex>& lockGuard) const
 uint64_t RaftConsensus::leaderLeaseStart() const
 {
     TimeBounds t;
-    for (uint64_t index = log->getLastLogIndex();
-         index >= log->getLogStartIndex();
-         --index)
+    if (log->getLogStartIndex() <= lastEntryInPreviousTermIndex 
+        && lastEntryInPreviousTermIndex <= log->getLastLogIndex())
     {
-        const Log::Entry &entry = log->getEntry(index);
-        assert(entry.term() <= currentTerm);
-        if (entry.term() < currentTerm) {
-            t = TimeBounds(entry);
-            VERBOSE("Found term %lu index %lu entry with local time %s",
-                    entry.term(), entry.index(), t.toString().c_str());
-            // We're reverse-iterating, this is the last entry.
-            break;
-        }
-    }
-
-    if (t.empty() && lastSnapshotTerm < currentTerm)
-    {
+        const Log::Entry &entry = log->getEntry(lastEntryInPreviousTermIndex);
+        assert(entry.term() < currentTerm);
+        t = TimeBounds(entry);
+        VERBOSE("Found term %lu index %lu entry with local time %s",
+                entry.term(), entry.index(), t.toString().c_str());
+    } else if (lastSnapshotTerm < currentTerm) {
         VERBOSE("Using last snapshot with local time %s",
                 lastSnapshotLocalTimeBounds.toString().c_str());
         t = lastSnapshotLocalTimeBounds;
-    }
-    
-    if (t.empty()) {
+    } else {
         if (state == State::LEADER) {
             // No entries in past terms. I'm the leader of the first term ever.
             assert(currentTerm <= 1);

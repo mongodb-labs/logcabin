@@ -1680,6 +1680,12 @@ class RaftConsensus {
     uint64_t commitIndex;
 
     /**
+     * The index of the last entry in any previous term (any term number <
+     * currentTerm), or 0.
+     */
+    uint64_t lastEntryInPreviousTermIndex;
+
+    /**
      * The server ID of the leader for this term. This is used to help point
      * clients to the right server. The special value 0 means either there is
      * no leader for this term yet or this server does not know who it is yet.
