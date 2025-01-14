@@ -2312,7 +2312,9 @@ RaftConsensus::advanceCommitIndex()
         return;
     }
     commitIndex = newCommitIndex;
-    NOTICE("New commitIndex: %lu, [%lu, %lu]", commitIndex, log->getEntry(newCommitIndex).local_time_earliest(), log->getEntry(newCommitIndex).local_time_latest());
+    VERBOSE("New commitIndex: %lu, [%lu, %lu]", 
+            commitIndex, log->getEntry(newCommitIndex).local_time_earliest(),
+            log->getEntry(newCommitIndex).local_time_latest());
     assert(commitIndex <= log->getLastLogIndex());
     stateChanged.notify_all();
 
