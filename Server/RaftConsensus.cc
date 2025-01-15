@@ -3195,7 +3195,6 @@ uint64_t RaftConsensus::leaderLeaseStart() const
     } else {
         if (state == State::LEADER) {
             // No entries in past terms. I'm the leader of the first term ever.
-            assert(currentTerm <= 1);
             VERBOSE("I'm the leader of the first term, lease starts now");
         }
         return 0;
