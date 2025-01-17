@@ -86,8 +86,8 @@ void
 RaftService::appendEntries(RPC::ServerRPC rpc)
 {
     PRELUDE(AppendEntries);
-    NOTICE("AppendEntries:\n%s",
-           Core::ProtoBuf::dumpString(request).c_str());
+    VERBOSE("AppendEntries:\n%s",
+            Core::ProtoBuf::dumpString(request).c_str());
     globals.raft->handleAppendEntries(request, response);
     rpc.reply(response);
 }
