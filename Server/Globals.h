@@ -211,6 +211,8 @@ class Globals {
      */
     bool isPartitioned;
 
+    bool quorumCheckOnRead, leaseEnabled, deferCommitEnabled, inheritLeaseEnabled;
+
   private:
 
     /**

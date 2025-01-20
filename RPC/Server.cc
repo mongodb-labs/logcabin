@@ -13,6 +13,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include "Core/Time.h"
 #include "RPC/OpaqueServerRPC.h"
 #include "RPC/Server.h"
 #include "RPC/ServerRPC.h"
@@ -20,7 +21,9 @@
 
 namespace LogCabin {
 namespace RPC {
-
+namespace {
+    typedef Core::Time::SteadyClock Clock;
+} // anonymous namespace
 
 ////////// Server::RPCHandler //////////
 
@@ -36,6 +39,7 @@ Server::RPCHandler::~RPCHandler()
 void
 Server::RPCHandler::handleRPC(OpaqueServerRPC opaqueRPC)
 {
+    auto start = Clock::now();
     ServerRPC rpc(std::move(opaqueRPC));
     if (!rpc.needsReply()) {
         // The RPC may have had an invalid header, in which case it needs no
@@ -53,6 +57,9 @@ Server::RPCHandler::handleRPC(OpaqueServerRPC opaqueRPC)
         service->handleRPC(std::move(rpc));
     else
         rpc.rejectInvalidService();
+        
+    auto duration = Clock::now() - start;
+    
 }
 
 ////////// Server //////////

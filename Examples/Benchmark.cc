@@ -26,6 +26,7 @@
 #include <atomic>
 #endif
 #include <cassert>
+#include <cstring>
 #include <ctime>
 #include <getopt.h>
 #include <iostream>
@@ -44,6 +45,12 @@ using LogCabin::Client::Status;
 using LogCabin::Client::Tree;
 using LogCabin::Client::Util::parseNonNegativeDuration;
 
+enum OperationType
+{
+    READ,
+    WRITE,
+};
+
 /**
  * Parses argv for the main function.
  */
@@ -55,8 +62,9 @@ class OptionParser {
         , cluster("logcabin:5254")
         , logPolicy("")
         , size(1024)
-        , writers(1)
-        , totalWrites(1000)
+        , threads(1)
+        , operationType(OperationType::READ)
+        , totalOperations(1000)
         , timeout(parseNonNegativeDuration("30s"))
     {
         while (true) {
@@ -65,13 +73,14 @@ class OptionParser {
                {"help",  no_argument, NULL, 'h'},
                {"size",  required_argument, NULL, 's'},
                {"threads",  required_argument, NULL, 't'},
+               {"operation-type",  required_argument, NULL, 'o'},
                {"timeout",  required_argument, NULL, 'd'},
-               {"writes",  required_argument, NULL, 'w'},
+               {"operations",  required_argument, NULL, 'n'},
                {"verbose",  no_argument, NULL, 'v'},
                {"verbosity",  required_argument, NULL, 256},
                {0, 0, 0, 0}
             };
-            int c = getopt_long(argc, argv, "c:hs:t:w:v", longOptions, NULL);
+            int c = getopt_long(argc, argv, "c:hs:t:o:n:v", longOptions, NULL);
 
             // Detect the end of the options.
             if (c == -1)
@@ -91,10 +100,20 @@ class OptionParser {
                     size = uint64_t(atol(optarg));
                     break;
                 case 't':
-                    writers = uint64_t(atol(optarg));
+                    threads = uint64_t(atol(optarg));
                     break;
-                case 'w':
-                    totalWrites = uint64_t(atol(optarg));
+                case 'o':
+                    if (0 == strcmp(optarg, "read")) {
+                        operationType = OperationType::READ;
+                    } else if (0 == strcmp(optarg, "write")) {
+                        operationType = OperationType::WRITE;
+                    } else {
+                        usage();
+                        exit(1);
+                    }
+                    break;
+                case 'n':
+                    totalOperations = uint64_t(atol(optarg));
                     break;
                 case 'v':
                     logPolicy = "VERBOSE";
@@ -113,10 +132,10 @@ class OptionParser {
 
     void usage() {
         std::cout
-            << "Writes repeatedly to LogCabin. Stops once it reaches "
+            << "Reads or writes repeatedly to LogCabin. Stops once it reaches "
             << "the given number of"
             << std::endl
-            << "writes or the timeout, whichever comes first."
+            << "operations or the timeout, whichever comes first."
             << std::endl
             << std::endl
             << "This program is subject to change (it is not part of "
@@ -150,15 +169,19 @@ class OptionParser {
             << std::endl
 
             << "  --threads <num>         "
-            << "Number of concurrent writers [default: 1]"
+            << "Number of concurrent readers/threads [default: 1]"
+            << std::endl
+
+            << "  --operation-type <type> "
+            << "'read' or 'write'"
             << std::endl
 
             << "  --timeout <time>        "
             << "Time after which to exit [default: 30s]"
             << std::endl
 
-            << "  --writes <num>          "
-            << "Number of total writes [default: 1000]"
+            << "  --operations <num>      "
+            << "Number of operations [default: 1000]"
             << std::endl
 
             << "  -v, --verbose           "
@@ -187,8 +210,9 @@ class OptionParser {
     std::string cluster;
     std::string logPolicy;
     uint64_t size;
-    uint64_t writers;
-    uint64_t totalWrites;
+    uint64_t threads;
+    OperationType operationType;
+    uint64_t totalOperations;
     uint64_t timeout;
 };
 
@@ -201,32 +225,42 @@ class OptionParser {
  * \param tree
  *      Interface to LogCabin.
  * \param key
- *      Key to write repeatedly.
+ *      Key to read/write repeatedly.
  * \param value
  *      Value to write at key repeatedly.
  * \param exit
  *      When this becomes true, this thread should exit.
- * \param[out] writesDone
- *      The number of writes this thread has completed.
+ * \param[out] operationsDone
+ *      The number of operations this thread has completed.
  */
 void
-writeThreadMain(uint64_t id,
-                const OptionParser& options,
-                Tree tree,
-                const std::string& key,
-                const std::string& value,
-                std::atomic<bool>& exit,
-                uint64_t& writesDone)
+operationThreadMain(uint64_t id,
+                    const OptionParser& options,
+                    Tree tree,
+                    const std::string& key,
+                    const std::string& value,
+                    OperationType operationType,
+                    std::atomic<bool>& exit,
+                    uint64_t& operationsDone)
 {
-    uint64_t numWrites = options.totalWrites / options.writers;
+    uint64_t numOperations = options.totalOperations / options.threads;
     // assign any odd leftover writes in a balanced way
-    if (options.totalWrites - numWrites * options.writers > id)
-        numWrites += 1;
-    for (uint64_t i = 0; i < numWrites; ++i) {
+    if (options.totalOperations - numOperations * options.threads > id)
+        numOperations += 1;
+    for (uint64_t i = 0; i < numOperations; ++i) {
         if (exit)
             break;
-        tree.writeEx(key, value);
-        writesDone = i + 1;
+        if (operationType == OperationType::READ) {
+            std::string contents;
+            auto result = tree.read(key, contents);
+            if (result.status != Status::OK && result.status != Status::LOOKUP_ERROR) {
+                std::cerr << "Read key '" << key << "': " << result.error;
+                ::exit(1);
+            }
+        } else {
+            tree.writeEx(key, value);
+        }
+        operationsDone = i + 1;
     }
 }
 
@@ -282,19 +316,20 @@ main(int argc, char** argv)
 
         uint64_t startNanos = timeNanos();
         std::atomic<bool> exit(false);
-        std::vector<uint64_t> writesDonePerThread(options.writers);
-        uint64_t totalWritesDone = 0;
+        std::vector<uint64_t> operationsDonePerThread(options.threads);
+        uint64_t totalOperationsDone = 0;
         std::vector<std::thread> threads;
         std::thread timer(timerThreadMain, options.timeout, std::ref(exit));
-        for (uint64_t i = 0; i < options.writers; ++i) {
-            threads.emplace_back(writeThreadMain, i, std::ref(options),
+        for (uint64_t i = 0; i < options.threads; ++i) {
+            threads.emplace_back(operationThreadMain, i, std::ref(options),
                                  tree, std::ref(key), std::ref(value),
+                                 options.operationType,
                                  std::ref(exit),
-                                 std::ref(writesDonePerThread.at(i)));
+                                 std::ref(operationsDonePerThread.at(i)));
         }
-        for (uint64_t i = 0; i < options.writers; ++i) {
+        for (uint64_t i = 0; i < options.threads; ++i) {
             threads.at(i).join();
-            totalWritesDone += writesDonePerThread.at(i);
+            totalOperationsDone += operationsDonePerThread.at(i);
         }
         uint64_t endNanos = timeNanos();
         exit = true;
@@ -303,9 +338,9 @@ main(int argc, char** argv)
         tree.removeFile(key);
         std::cout << "Benchmark took "
                   << static_cast<double>(endNanos - startNanos) / 1e6
-                  << " ms to write "
-                  << totalWritesDone
-                  << " objects"
+                  << " ms to do "
+                  << totalOperationsDone
+                  << " operations"
                   << std::endl;
         return 0;
 

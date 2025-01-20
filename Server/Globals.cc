@@ -89,6 +89,10 @@ Globals::Globals()
     , raft()
     , stateMachine()
     , isPartitioned(false)
+    , quorumCheckOnRead(true) // original Raft consistency mechanism
+    , leaseEnabled(false)
+    , deferCommitEnabled(false)
+    , inheritLeaseEnabled(false)
     , controlService()
     , raftService()
     , clientService()
@@ -181,6 +185,11 @@ Globals::init()
     }
 
     serverStats.enable();
+    
+    quorumCheckOnRead = config.read<bool>("quorumCheckOnRead", true);
+    leaseEnabled = config.read<bool>("leaseEnabled", false);
+    deferCommitEnabled = config.read<bool>("deferCommitEnabled", false);
+    inheritLeaseEnabled = config.read<bool>("inheritLeaseEnabled", false);
 }
 
 void

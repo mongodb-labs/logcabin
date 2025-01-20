@@ -1184,7 +1184,7 @@ class RaftConsensus {
      * paper.
      */
     std::chrono::nanoseconds LEASE_TIMEOUT_DELTA;
-
+    
     /**
      * Print out the contents of this class for debugging purposes.
      */

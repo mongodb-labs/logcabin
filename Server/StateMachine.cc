@@ -152,24 +152,30 @@ StateMachine::query(const Query::Request& request,
     {
         const auto localNow = Core::Time::TimeBounds::localNow();
         const auto appliedAge = localNow.latest - lastAppliedTimeBounds.earliest;
-        bool isLimboRead =
-            std::any_of(paths.cbegin(), paths.cend(), [&](const std::string &p)
-                        { return limboPaths.find(p) != limboPaths.end(); });
-        if (appliedAge 
-            > static_cast<uint64_t>(globals.raft->LEASE_TIMEOUT_DELTA.count()))
-        {
-            WARNING("rejecting read, no lease,"
-                    " delta %f sec now %s lastAppliedTimeBounds %s,"
-                    " diff %f sec, path '%s' %s limbo region",
-                    double(globals.raft->LEASE_TIMEOUT_DELTA.count()) / 1e9,
-                    localNow.toString().c_str(),
-                    lastAppliedTimeBounds.toString().c_str(),
-                    double(appliedAge) / 1e9,
-                    Core::StringUtil::toString(paths).c_str(),
-                    isLimboRead ? "is in" : "isn't in");
-            return false;
-        }
+        bool isLimboRead;
+        if (globals.inheritLeaseEnabled) {
+            isLimboRead = std::any_of(
+                paths.cbegin(), paths.cend(), [&](const std::string &p)
+                    { return limboPaths.find(p) != limboPaths.end(); });
 
+            if (appliedAge 
+                > static_cast<uint64_t>(globals.raft->LEASE_TIMEOUT_DELTA.count()))
+            {
+                WARNING("rejecting read, no lease,"
+                        " delta %f sec now %s lastAppliedTimeBounds %s,"
+                        " diff %f sec, path '%s' %s limbo region",
+                        double(globals.raft->LEASE_TIMEOUT_DELTA.count()) / 1e9,
+                        localNow.toString().c_str(),
+                        lastAppliedTimeBounds.toString().c_str(),
+                        double(appliedAge) / 1e9,
+                        Core::StringUtil::toString(paths).c_str(),
+                        isLimboRead ? "is in" : "isn't in");
+                return false;
+            }
+        } else {
+            isLimboRead = true; // disable reads without lease
+        }
+ 
         // If I committed an entry in my term, I have no limbo region.
         if (lastAppliedTerm >= globals.raft->getCurrentTerm())
             break;

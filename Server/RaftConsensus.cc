@@ -1213,7 +1213,7 @@ RaftConsensus::getLastCommitIndex() const
     if (exiting || state != State::LEADER)
         return {ClientResult::NOT_LEADER, 0};
 
-    if (!globals.config.read<bool>("quorumCheckOnRead", true))
+    if (!globals.quorumCheckOnRead)
     {
         return {ClientResult::SUCCESS, commitIndex};
     }
@@ -1634,6 +1634,18 @@ RaftConsensus::replicate(const Core::Buffer& operation)
     Log::Entry entry;
     entry.set_type(Protocol::Raft::EntryType::DATA);
     entry.set_data(operation.getData(), operation.getLength());
+    if (globals.leaseEnabled && !globals.deferCommitEnabled) {
+        while (true) {
+            auto leaseStartAt = leaderLeaseStart();
+            auto localNow = TimeBounds::localNow();
+            if (leaseStartAt >= localNow.earliest) {
+                break;
+            }
+            
+            stateChanged.wait(lockGuard);
+        }
+    }
+
     return replicateEntry(entry, lockGuard);
 }
 
@@ -3179,6 +3191,10 @@ RaftConsensus::upToDateLeader(std::unique_lock<Mutex>& lockGuard) const
 
 uint64_t RaftConsensus::leaderLeaseStart() const
 {
+    if (!globals.leaseEnabled) {
+        return 0;
+    }
+    
     TimeBounds t;
     if (log->getLogStartIndex() <= lastEntryInPreviousTermIndex 
         && lastEntryInPreviousTermIndex <= log->getLastLogIndex())
