@@ -16,6 +16,7 @@
 
 #include "Client/SessionManager.h"
 #include "Core/ProtoBuf.h"
+#include "Core/StringUtil.h"
 #include "Protocol/Common.h"
 #include "RPC/ClientRPC.h"
 #include "RPC/ClientSession.h"
@@ -23,6 +24,8 @@
 
 namespace LogCabin {
 namespace Client {
+
+using Core::StringUtil::toString;
 
 SessionManager::SessionManager(Event::Loop& eventLoop,
                                const Core::Config& config)
@@ -117,9 +120,10 @@ SessionManager::createSession(const RPC::Address& address,
     }
     return RPC::ClientSession::makeErrorSession(
         eventLoop,
-        Core::StringUtil::format("Verifying recipient with %s failed "
-                                 "(after connecting over TCP)",
-                                 address.toString().c_str()));
+        Core::StringUtil::format("Verifying recipient at %s failed "
+                                 "with %s (after connecting over TCP)",
+                                 address.toString().c_str(),
+                                 toString(status).c_str()));
 }
 
 } // namespace LogCabin::Client

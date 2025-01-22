@@ -28,6 +28,7 @@
 #include <cassert>
 #include <cstring>
 #include <ctime>
+#include <fstream>
 #include <getopt.h>
 #include <iostream>
 #include <thread>
@@ -66,6 +67,7 @@ class OptionParser {
         , operationType(OperationType::READ)
         , totalOperations(1000)
         , timeout(parseNonNegativeDuration("30s"))
+        , opsPerSecFileName("")
     {
         while (true) {
             static struct option longOptions[] = {
@@ -78,6 +80,7 @@ class OptionParser {
                {"operations",  required_argument, NULL, 'n'},
                {"verbose",  no_argument, NULL, 'v'},
                {"verbosity",  required_argument, NULL, 256},
+               {"opsPerSecFile",  required_argument, NULL, 'f'},
                {0, 0, 0, 0}
             };
             int c = getopt_long(argc, argv, "c:hs:t:o:n:v", longOptions, NULL);
@@ -120,6 +123,9 @@ class OptionParser {
                     break;
                 case 256:
                     logPolicy = optarg;
+                    break;
+                case 'f':
+                    opsPerSecFileName = optarg;
                     break;
                 case '?':
                 default:
@@ -183,6 +189,10 @@ class OptionParser {
             << "  --operations <num>      "
             << "Number of operations [default: 1000]"
             << std::endl
+            
+            << "  --opsPerSecFile <file>        "
+            << "Output file for operations/sec value"
+            << std::endl
 
             << "  -v, --verbose           "
             << "Same as --verbosity=VERBOSE"
@@ -214,6 +224,7 @@ class OptionParser {
     OperationType operationType;
     uint64_t totalOperations;
     uint64_t timeout;
+    std::string opsPerSecFileName;
 };
 
 /**
@@ -342,6 +353,13 @@ main(int argc, char** argv)
                   << totalOperationsDone
                   << " operations"
                   << std::endl;
+                  
+        if (options.opsPerSecFileName != "") {
+            auto sec = static_cast<double>(endNanos - startNanos) / 1e9;
+            std::ofstream f(options.opsPerSecFileName);
+            f << (static_cast<double>(totalOperationsDone) / sec);
+        }
+                  
         return 0;
 
     } catch (const LogCabin::Client::Exception& e) {
