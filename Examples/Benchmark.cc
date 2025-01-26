@@ -25,7 +25,9 @@
 #else
 #include <atomic>
 #endif
+#include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cstring>
 #include <ctime>
 #include <fstream>
@@ -33,6 +35,7 @@
 #include <iostream>
 #include <thread>
 #include <unistd.h>
+#include <vector>
 
 #include <LogCabin/Client.h>
 #include <LogCabin/Debug.h>
@@ -57,84 +60,91 @@ enum OperationType
  */
 class OptionParser {
   public:
-    OptionParser(int& argc, char**& argv)
-        : argc(argc)
-        , argv(argv)
-        , cluster("logcabin:5254")
-        , logPolicy("")
-        , size(1024)
-        , threads(1)
-        , operationType(OperationType::READ)
-        , totalOperations(1000)
-        , timeout(parseNonNegativeDuration("30s"))
-        , opsPerSecFileName("")
-    {
-        while (true) {
-            static struct option longOptions[] = {
-               {"cluster",  required_argument, NULL, 'c'},
-               {"help",  no_argument, NULL, 'h'},
-               {"size",  required_argument, NULL, 's'},
-               {"threads",  required_argument, NULL, 't'},
-               {"operation-type",  required_argument, NULL, 'o'},
-               {"timeout",  required_argument, NULL, 'd'},
-               {"operations",  required_argument, NULL, 'n'},
-               {"verbose",  no_argument, NULL, 'v'},
-               {"verbosity",  required_argument, NULL, 256},
-               {"opsPerSecFile",  required_argument, NULL, 'f'},
-               {0, 0, 0, 0}
-            };
-            int c = getopt_long(argc, argv, "c:hs:t:o:n:v", longOptions, NULL);
+      OptionParser(int &argc, char **&argv)
+          : argc(argc)
+          , argv(argv)
+          , cluster("logcabin:5254")
+          , logPolicy("")
+          , size(1024)
+          , threads(1)
+          , operationType(OperationType::READ)
+          , totalOperations(1000)
+          , timeout(parseNonNegativeDuration("30s"))
+          , resultsFileName("")
+      {
+          while (true)
+          {
+              static struct option longOptions[] = {
+                  {"cluster", required_argument, NULL, 'c'},
+                  {"help", no_argument, NULL, 'h'},
+                  {"size", required_argument, NULL, 's'},
+                  {"threads", required_argument, NULL, 't'},
+                  {"operation-type", required_argument, NULL, 'o'},
+                  {"timeout", required_argument, NULL, 'd'},
+                  {"operations", required_argument, NULL, 'n'},
+                  {"verbose", no_argument, NULL, 'v'},
+                  {"verbosity", required_argument, NULL, 256},
+                  {"resultsFile", required_argument, NULL, 'f'},
+                  {0, 0, 0, 0}};
+              int c =
+                  getopt_long(argc, argv, "c:hs:t:o:n:v", longOptions, NULL);
 
-            // Detect the end of the options.
-            if (c == -1)
-                break;
+              // Detect the end of the options.
+              if (c == -1)
+                  break;
 
-            switch (c) {
-                case 'c':
-                    cluster = optarg;
-                    break;
-                case 'd':
-                    timeout = parseNonNegativeDuration(optarg);
-                    break;
-                case 'h':
-                    usage();
-                    exit(0);
-                case 's':
-                    size = uint64_t(atol(optarg));
-                    break;
-                case 't':
-                    threads = uint64_t(atol(optarg));
-                    break;
-                case 'o':
-                    if (0 == strcmp(optarg, "read")) {
-                        operationType = OperationType::READ;
-                    } else if (0 == strcmp(optarg, "write")) {
-                        operationType = OperationType::WRITE;
-                    } else {
-                        usage();
-                        exit(1);
-                    }
-                    break;
-                case 'n':
-                    totalOperations = uint64_t(atol(optarg));
-                    break;
-                case 'v':
-                    logPolicy = "VERBOSE";
-                    break;
-                case 256:
-                    logPolicy = optarg;
-                    break;
-                case 'f':
-                    opsPerSecFileName = optarg;
-                    break;
-                case '?':
-                default:
-                    // getopt_long already printed an error message.
-                    usage();
-                    exit(1);
-            }
-        }
-    }
+              switch (c)
+              {
+              case 'c':
+                  cluster = optarg;
+                  break;
+              case 'd':
+                  timeout = parseNonNegativeDuration(optarg);
+                  break;
+              case 'h':
+                  usage();
+                  exit(0);
+              case 's':
+                  size = uint64_t(atol(optarg));
+                  break;
+              case 't':
+                  threads = uint64_t(atol(optarg));
+                  break;
+              case 'o':
+                  if (0 == strcmp(optarg, "read"))
+                  {
+                      operationType = OperationType::READ;
+                  }
+                  else if (0 == strcmp(optarg, "write"))
+                  {
+                      operationType = OperationType::WRITE;
+                  }
+                  else
+                  {
+                      usage();
+                      exit(1);
+                  }
+                  break;
+              case 'n':
+                  totalOperations = uint64_t(atol(optarg));
+                  break;
+              case 'v':
+                  logPolicy = "VERBOSE";
+                  break;
+              case 256:
+                  logPolicy = optarg;
+                  break;
+              case 'f':
+                  resultsFileName = optarg;
+                  break;
+              case '?':
+              default:
+                  // getopt_long already printed an error message.
+                  usage();
+                  exit(1);
+              }
+          }
+      }
 
     void usage() {
         std::cout
@@ -224,8 +234,48 @@ class OptionParser {
     OperationType operationType;
     uint64_t totalOperations;
     uint64_t timeout;
-    std::string opsPerSecFileName;
+    std::string resultsFileName;
 };
+
+struct ThreadResult
+{
+    std::vector<uint64_t> latencies; // microseconds
+
+    ThreadResult()
+        : latencies()
+    {
+    }
+};
+
+uint64_t getPercentile(const std::vector<uint64_t> &sortedLatencies,
+                       double percentile)
+{
+    size_t index = static_cast<size_t>(percentile * sortedLatencies.size());
+    return sortedLatencies[std::min(index, sortedLatencies.size() - 1)];
+}
+
+void calculatePercentiles(const std::vector<ThreadResult> &threadResults,
+                          uint64_t &p50, uint64_t &p90, uint64_t &p95)
+{
+    // Combine all latencies
+    std::vector<uint64_t> allLatencies;
+    for (const auto &threadResult : threadResults)
+    {
+        allLatencies.insert(allLatencies.end(), threadResult.latencies.begin(),
+                            threadResult.latencies.end());
+    }
+
+    if (allLatencies.empty())
+    {
+        p50 = p90 = p95 = 0;
+        return;
+    }
+
+    std::sort(allLatencies.begin(), allLatencies.end());
+    p50 = getPercentile(allLatencies, 0.50);
+    p90 = getPercentile(allLatencies, 0.90);
+    p95 = getPercentile(allLatencies, 0.95);
+}
 
 /**
  * The main function for a single client thread.
@@ -244,23 +294,26 @@ class OptionParser {
  * \param[out] operationsDone
  *      The number of operations this thread has completed.
  */
-void
-operationThreadMain(uint64_t id,
-                    const OptionParser& options,
-                    Tree tree,
-                    const std::string& key,
-                    const std::string& value,
-                    OperationType operationType,
-                    std::atomic<bool>& exit,
-                    uint64_t& operationsDone)
+void operationThreadMain(uint64_t id, const OptionParser &options, Tree tree,
+                         const std::string &key, const std::string &value,
+                         OperationType operationType, std::atomic<bool> &exit,
+                         ThreadResult &result)
 {
     uint64_t numOperations = options.totalOperations / options.threads;
     // assign any odd leftover writes in a balanced way
     if (options.totalOperations - numOperations * options.threads > id)
         numOperations += 1;
-    for (uint64_t i = 0; i < numOperations; ++i) {
+
+    result.latencies.reserve(numOperations);
+
+    uint64_t i = 0;
+    for (; i < numOperations; ++i)
+    {
         if (exit)
             break;
+
+        auto start = std::chrono::high_resolution_clock::now();
+
         if (operationType == OperationType::READ) {
             std::string contents;
             auto result = tree.read(key, contents);
@@ -271,7 +324,12 @@ operationThreadMain(uint64_t id,
         } else {
             tree.writeEx(key, value);
         }
-        operationsDone = i + 1;
+
+        auto end = std::chrono::high_resolution_clock::now();
+        uint64_t latency =
+            std::chrono::duration_cast<std::chrono::microseconds>(end - start)
+                .count();
+        result.latencies.push_back(latency);
     }
 }
 
@@ -327,20 +385,19 @@ main(int argc, char** argv)
 
         uint64_t startNanos = timeNanos();
         std::atomic<bool> exit(false);
-        std::vector<uint64_t> operationsDonePerThread(options.threads);
+        std::vector<ThreadResult> resultPerThread{options.threads};
         uint64_t totalOperationsDone = 0;
         std::vector<std::thread> threads;
         std::thread timer(timerThreadMain, options.timeout, std::ref(exit));
         for (uint64_t i = 0; i < options.threads; ++i) {
             threads.emplace_back(operationThreadMain, i, std::ref(options),
                                  tree, std::ref(key), std::ref(value),
-                                 options.operationType,
-                                 std::ref(exit),
-                                 std::ref(operationsDonePerThread.at(i)));
+                                 options.operationType, std::ref(exit),
+                                 std::ref(resultPerThread.at(i)));
         }
         for (uint64_t i = 0; i < options.threads; ++i) {
             threads.at(i).join();
-            totalOperationsDone += operationsDonePerThread.at(i);
+            totalOperationsDone += resultPerThread.at(i).latencies.size();
         }
         uint64_t endNanos = timeNanos();
         exit = true;
@@ -353,15 +410,20 @@ main(int argc, char** argv)
                   << totalOperationsDone
                   << " operations"
                   << std::endl;
-                  
-        if (options.opsPerSecFileName != "") {
-            auto sec = static_cast<double>(endNanos - startNanos) / 1e9;
-            std::ofstream f(options.opsPerSecFileName);
-            f << (static_cast<double>(totalOperationsDone) / sec);
-        }
-                  
-        return 0;
 
+        if (options.resultsFileName != "")
+        {
+            std::ofstream f(options.resultsFileName);
+            f << "opsPerSec,p50latencyMicros,p90latencyMicros,p95latencyMicros"
+              << std::endl;
+            auto sec = static_cast<double>(endNanos - startNanos) / 1e9;
+            f << (static_cast<double>(totalOperationsDone) / sec) << ",";
+            uint64_t p50, p90, p95;
+            calculatePercentiles(resultPerThread, p50, p90, p95);
+            f << p50 << "," << p90 << "," << p95 << std::endl;
+        }
+
+        return 0;
     } catch (const LogCabin::Client::Exception& e) {
         std::cerr << "Exiting due to LogCabin::Client::Exception: "
                   << e.what()

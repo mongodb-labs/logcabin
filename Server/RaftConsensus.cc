@@ -2155,8 +2155,12 @@ RaftConsensus::extendLeaseThreadMain()
 {
     std::unique_lock<Mutex> lockGuard(mutex);
     Core::ThreadId::setName("extendLease");
+    uint64_t lastExtended = 0;
+    auto freq = std::chrono::nanoseconds(LEASE_TIMEOUT_DELTA).count() / 2;
     while (!exiting) {
-        if (state == State::LEADER) {
+        auto localNow = TimeBounds::localNow();
+        if (state == State::LEADER && localNow.latest - lastExtended >= freq) {
+            NOTICE("extend lease");
             Log::Entry entry;
             entry.set_term(currentTerm);
             entry.set_type(Protocol::Raft::EntryType::NOOP);
@@ -2165,9 +2169,7 @@ RaftConsensus::extendLeaseThreadMain()
             append({&entry});
         }
         
-        auto microseconds = static_cast<__useconds_t>(
-            std::chrono::duration_cast<std::chrono::microseconds>(
-                LEASE_TIMEOUT_DELTA).count() / 2);
+        auto microseconds = freq / 1000;
         lockGuard.unlock();
         usleep(microseconds);
         lockGuard.lock();

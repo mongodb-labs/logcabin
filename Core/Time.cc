@@ -248,37 +248,56 @@ SteadyTimeConverter::unixNanos(SteadyClock::time_point when)
 
 namespace
 {
-    std::string clockBoundErrToString(const clockbound_err *err)
+std::string clockBoundErrToString(const clockbound_err *err)
+{
+    switch (err->kind)
     {
-        switch (err->kind)
+    case CLOCKBOUND_ERR_NONE:
+        return "success";
+    case CLOCKBOUND_ERR_SYSCALL:
+        if (err->detail)
         {
-        case CLOCKBOUND_ERR_NONE:
-            return "success";
-        case CLOCKBOUND_ERR_SYSCALL:
-            if (err->detail)
-            {
-                return std::string{err->detail} + strerror(err->sys_errno);
-            }
-            else
-            {
-                return std::string{strerror(err->sys_errno)};
-            }
-        case CLOCKBOUND_ERR_SEGMENT_NOT_INITIALIZED:
-            return "Segment not initialized";
-        case CLOCKBOUND_ERR_SEGMENT_MALFORMED:
-            return "Segment malformed";
-        case CLOCKBOUND_ERR_CAUSALITY_BREACH:
-            return "Segment and clock reads out of order";
+            return std::string{err->detail} + strerror(err->sys_errno);
         }
-
-        PANIC("Unhandled clockbound error %d", err->kind);
+        else
+        {
+            return std::string{strerror(err->sys_errno)};
+        }
+    case CLOCKBOUND_ERR_SEGMENT_NOT_INITIALIZED:
+        return "Segment not initialized";
+    case CLOCKBOUND_ERR_SEGMENT_MALFORMED:
+        return "Segment malformed";
+    case CLOCKBOUND_ERR_CAUSALITY_BREACH:
+        return "Segment and clock reads out of order";
     }
+
+    PANIC("Unhandled clockbound error %d", err->kind);
+}
+
+std::string uint64_to_time_str(uint64_t nanos_since_epoch) {
+    uint64_t seconds = nanos_since_epoch / 1000000000;
+    uint64_t nanoseconds = nanos_since_epoch % 1000000000;
+    uint64_t microseconds = nanoseconds / 1000;
+    time_t time_seconds = static_cast<time_t>(seconds);
+    // Convert to struct tm (UTC time).
+    struct tm time_struct;
+    gmtime_r(&time_seconds, &time_struct);
+
+    // Format the time into a string
+    char buffer[32];
+    strftime(buffer, sizeof(buffer), "%F %T", &time_struct);
+
+    // Append fractional seconds
+    std::ostringstream oss;
+    oss << buffer << "." << std::setw(6) << std::setfill('0') << microseconds;
+    return oss.str();
+}
 } // anonymous namespace
 
 std::string TimeBounds::toString() const
 {
-    return std::string{"["} + std::to_string(earliest) +
-           ", " + std::to_string(latest) + "]";
+    return std::string{"["} + uint64_to_time_str(earliest) +
+           ", " + uint64_to_time_str(latest) + "]";
 }
 
 TimeBounds TimeBounds::localNow()
