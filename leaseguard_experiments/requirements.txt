@@ -1,1 +1,3 @@
 paramiko
+matplotlib
+pandas

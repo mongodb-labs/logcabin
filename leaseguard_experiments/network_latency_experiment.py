@@ -66,7 +66,7 @@ class BenchmarkOptions:
 
 
 class Stats:
-    CSV_FILE_PATH = os.path.basename(__file__) + "/results.csv"
+    CSV_FILE_PATH = os.path.dirname(__file__) + "/network_latency_experiment.csv"
 
     @dataclass
     class Row(BenchmarkOptions):
@@ -197,9 +197,9 @@ def run_benchmark(options: BenchmarkOptions, stats: Stats):
     storagePath = /tmp/logcabin
     logPolicy = NOTICE
     snapshotMinLogSize = 99999999999
-    tcpConnectTimeoutMilliseconds = {max(10000, 10 * options.latencyMs)}
-    electionTimeoutMilliseconds = {max(10000, 10 * options.latencyMs)}
-    delta = {max(1000, 5 * options.latencyMs)}
+    tcpConnectTimeoutMilliseconds = 10000
+    electionTimeoutMilliseconds = 500
+    delta = 500
     quorumCheckOnRead = {bul(options.quorumCheckOnRead)}
     leaseEnabled = {bul(options.leaseEnabled)}
     deferCommitEnabled = {bul(options.deferCommitEnabled)}
@@ -295,7 +295,7 @@ if __name__ == "__main__":
         (True, False, False, False),
         (False, True, True, True),
     ]:
-        for latencyMs in range(0, 501, 100):
+        for latencyMs in (0, 1, 2, 3, 4, 5, 6):
             for operationType in ("read", "write"):
                 options = BenchmarkOptions(
                     latencyMs=latencyMs,
