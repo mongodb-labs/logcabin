@@ -51,7 +51,7 @@ class BenchmarkOptions:
     deferCommitEnabled: bool = False
     inheritLeaseEnabled: bool = False
     size: int = 1024
-    threads: int = 100
+    threads: int = 1
     operations: int = 100000
 
     def __post_init__(self):
