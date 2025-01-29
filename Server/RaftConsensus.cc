@@ -187,8 +187,11 @@ Peer::Peer(uint64_t serverId, RaftConsensus& consensus)
     , snapshotFileOffset(0)
     , lastSnapshotIndex(0)
     , session()
-    , rpc()
+    , rpcs()
+    , threads()
 {
+    for (uint64_t i = 0; i < 4; ++i)
+        rpcs.emplace_back();
 }
 
 Peer::~Peer()
@@ -248,7 +251,8 @@ Peer::haveVote() const
 void
 Peer::interrupt()
 {
-    rpc.cancel();
+    for (auto it = rpcs.begin(); it != rpcs.end(); ++it)
+        it->cancel();
 }
 
 bool
@@ -267,14 +271,17 @@ Peer::CallStatus
 Peer::callRPC(Protocol::Raft::OpCode opCode,
               const google::protobuf::Message& request,
               google::protobuf::Message& response,
+              uint64_t peerThreadId,
               std::unique_lock<Mutex>& lockGuard)
 {
     typedef RPC::ClientRPC::Status RPCStatus;
+    RPC::ClientRPC& rpc = rpcs.at(peerThreadId);
     rpc = RPC::ClientRPC(getSession(lockGuard),
                          Protocol::Common::ServiceId::RAFT_SERVICE,
                          /* serviceSpecificErrorVersion = */ 0,
                          opCode,
                          request);
+
     // release lock for concurrency
     Core::MutexUnlock<Mutex> unlockGuard(lockGuard);
     switch (rpc.waitForReply(&response, NULL, TimePoint::max())) {
@@ -315,9 +322,11 @@ Peer::startThread(std::shared_ptr<Peer> self)
 {
     thisCatchUpIterationStart = Clock::now();
     thisCatchUpIterationGoalId = consensus.log->getLastLogIndex();
-    ++consensus.numPeerThreads;
-    NOTICE("Starting peer thread for server %lu", serverId);
-    std::thread(&RaftConsensus::peerThreadMain, &consensus, self).detach();
+    for (uint64_t i = 0; i < 4; ++i) {
+        ++consensus.numPeerThreads;
+        threads.emplace_back(&RaftConsensus::peerThreadMain, &consensus, self, i);
+        threads.back().detach();
+    }
 }
 
 std::shared_ptr<RPC::ClientSession>
@@ -915,6 +924,7 @@ RaftConsensus::Entry::Entry()
     , clusterTime(0)
     , localTimeBounds()
     , term(0)
+    , request()
 {
 }
 
@@ -926,6 +936,7 @@ RaftConsensus::Entry::Entry(Entry&& other)
     , clusterTime(other.clusterTime)
     , localTimeBounds(other.localTimeBounds)
     , term(other.term)
+    , request(std::move(other.request))
 {
 }
 
@@ -977,11 +988,13 @@ RaftConsensus::RaftConsensus(Globals& globals)
                      globals.config)
     , mutex()
     , stateChanged()
+    , entryCommitted()
     , exiting(false)
     , numPeerThreads(0)
     , log()
     , logSyncQueued(false)
     , leaderDiskThreadWorking(false)
+    , blocked()
     , configuration()
     , configurationManager()
     , currentTerm(0)
@@ -1010,6 +1023,8 @@ RaftConsensus::RaftConsensus(Globals& globals)
     , stepDownThread()
     , invariants(*this)
 {
+    for (uint64_t i = 0; i < 10; ++i)
+        entryCommitted.emplace_back();
 }
 
 RaftConsensus::~RaftConsensus()
@@ -1149,6 +1164,8 @@ RaftConsensus::exit()
     NOTICE("Shutting down");
     std::lock_guard<Mutex> lockGuard(mutex);
     exiting = true;
+    for (auto it = entryCommitted.begin(); it != entryCommitted.end(); ++it)
+        it->notify_all();
     if (configuration)
         configuration->forEach(&Server::exit);
     interruptAll();
@@ -1279,6 +1296,12 @@ RaftConsensus::getNextEntry(uint64_t lastIndex) const
                         Core::Buffer::deleteArrayFn<char>);
                 } else {
                     entry.type = Entry::SKIP;
+                }
+                auto it = blocked.find(nextIndex);
+                if (it != blocked.end()) {
+                    ClientRequest& request = *it->second.get();
+                    entry.request = std::move(request);
+                    blocked.erase(it);
                 }
                 entry.clusterTime = logEntry.cluster_time();
                 entry.localTimeBounds = Core::Time::TimeBounds(logEntry);
@@ -1647,6 +1670,16 @@ RaftConsensus::replicate(const Core::Buffer& operation)
     }
 
     return replicateEntry(entry, lockGuard);
+}
+
+void
+RaftConsensus::replicate2(const std::string& operation, ClientRequest request)
+{
+    std::unique_lock<Mutex> lockGuard(mutex);
+    Log::Entry entry;
+    entry.set_type(Protocol::Raft::EntryType::DATA);
+    entry.set_data(operation);
+    replicateEntry2(entry, lockGuard, std::move(request));
 }
 
 RaftConsensus::ClientResult
@@ -2177,11 +2210,11 @@ RaftConsensus::extendLeaseThreadMain()
 }
 
 void
-RaftConsensus::peerThreadMain(std::shared_ptr<Peer> peer)
+RaftConsensus::peerThreadMain(std::shared_ptr<Peer> peer, uint64_t peerThreadId)
 {
     std::unique_lock<Mutex> lockGuard(mutex);
     Core::ThreadId::setName(
-        Core::StringUtil::format("Peer(%lu)", peer->serverId));
+        Core::StringUtil::format("Peer(%lu.%lu)", peer->serverId, peerThreadId));
     NOTICE("Peer thread for server %lu started", peer->serverId);
 
     // Each iteration of this loop issues a new RPC or sleeps on the condition
@@ -2202,18 +2235,18 @@ RaftConsensus::peerThreadMain(std::shared_ptr<Peer> peer)
                 // Candidates request votes.
                 case State::CANDIDATE:
                     if (!peer->requestVoteDone)
-                        requestVote(lockGuard, *peer);
+                        requestVote(lockGuard, *peer, peerThreadId);
                     else
                         waitUntil = TimePoint::max();
                     break;
 
                 // Leaders replicate entries and periodically send heartbeats.
                 case State::LEADER:
-                    if (peer->getMatchIndex() < log->getLastLogIndex() ||
+                    if (peer->nextIndex <= log->getLastLogIndex() ||
                         peer->nextHeartbeatTime < now) {
                         // appendEntries delegates to installSnapshot if we
                         // need to send a snapshot instead
-                        appendEntries(lockGuard, *peer);
+                        appendEntries(lockGuard, *peer, peerThreadId);
                     } else {
                         waitUntil = peer->nextHeartbeatTime;
                     }
@@ -2325,6 +2358,9 @@ RaftConsensus::advanceCommitIndex()
                 currentTerm);
         return;
     }
+    for (uint64_t i = commitIndex + 1; i <= newCommitIndex; ++i) {
+        entryCommitted.at(i % 10).notify_all();
+    }
     commitIndex = newCommitIndex;
     VERBOSE("New commitIndex: %lu, [%lu, %lu]", 
             commitIndex, log->getEntry(newCommitIndex).local_time_earliest(),
@@ -2383,7 +2419,7 @@ RaftConsensus::append(const std::vector<const Log::Entry*>& entries)
 
 void
 RaftConsensus::appendEntries(std::unique_lock<Mutex>& lockGuard,
-                             Peer& peer)
+                             Peer& peer, uint64_t peerThreadId)
 {
     uint64_t lastLogIndex = log->getLastLogIndex();
     uint64_t prevLogIndex = peer.nextIndex - 1;
@@ -2391,7 +2427,7 @@ RaftConsensus::appendEntries(std::unique_lock<Mutex>& lockGuard,
 
     // Don't have needed entry: send a snapshot instead.
     if (peer.nextIndex < log->getLogStartIndex()) {
-        installSnapshot(lockGuard, peer);
+        installSnapshot(lockGuard, peer, peerThreadId);
         return;
     }
 
@@ -2405,7 +2441,7 @@ RaftConsensus::appendEntries(std::unique_lock<Mutex>& lockGuard,
         prevLogTerm = lastSnapshotTerm;
     } else {
         // Don't have needed entry for prevLogTerm: send snapshot instead.
-        installSnapshot(lockGuard, peer);
+        installSnapshot(lockGuard, peer, peerThreadId);
         return;
     }
 
@@ -2423,6 +2459,8 @@ RaftConsensus::appendEntries(std::unique_lock<Mutex>& lockGuard,
     // Execute RPC
     Protocol::Raft::AppendEntries::Response response;
     TimePoint start = Clock::now();
+    TimePoint restoreHeartbeatTime = peer.nextHeartbeatTime;
+    peer.nextHeartbeatTime = start + HEARTBEAT_PERIOD;
     uint64_t epoch = currentEpoch;
     Peer::CallStatus status;
     if (!globals.isPartitioned)
@@ -2430,6 +2468,7 @@ RaftConsensus::appendEntries(std::unique_lock<Mutex>& lockGuard,
         status = peer.callRPC(
                 Protocol::Raft::OpCode::APPEND_ENTRIES,
                 request, response,
+                peerThreadId,
                 lockGuard);
     }
     else
@@ -2443,6 +2482,8 @@ RaftConsensus::appendEntries(std::unique_lock<Mutex>& lockGuard,
         case Peer::CallStatus::FAILED:
             peer.suppressBulkData = true;
             peer.backoffUntil = start + RPC_FAILURE_BACKOFF;
+            peer.nextIndex = prevLogIndex + 1;
+            peer.nextHeartbeatTime = restoreHeartbeatTime;
             return;
         case Peer::CallStatus::INVALID_REQUEST:
             PANIC("The server's RaftService doesn't support the AppendEntries "
@@ -2501,6 +2542,8 @@ RaftConsensus::appendEntries(std::unique_lock<Mutex>& lockGuard,
                 }
             }
         } else {
+            peer.nextHeartbeatTime = restoreHeartbeatTime;
+            peer.nextIndex = prevLogIndex;
             if (peer.nextIndex > 1)
                 --peer.nextIndex;
             // A server that hasn't been around for a while might have a much
@@ -2530,7 +2573,7 @@ RaftConsensus::appendEntries(std::unique_lock<Mutex>& lockGuard,
 
 void
 RaftConsensus::installSnapshot(std::unique_lock<Mutex>& lockGuard,
-                               Peer& peer)
+                               Peer& peer, uint64_t peerThreadId)
 {
     // Build up request
     Protocol::Raft::InstallSnapshot::Request request;
@@ -2578,6 +2621,7 @@ RaftConsensus::installSnapshot(std::unique_lock<Mutex>& lockGuard,
         status = peer.callRPC(
                 Protocol::Raft::OpCode::INSTALL_SNAPSHOT,
                 request, response,
+                peerThreadId,
                 lockGuard);
     }
     else
@@ -2931,20 +2975,41 @@ RaftConsensus::replicateEntry(Log::Entry& entry,
                 VERBOSE("replicate succeeded");
                 return {ClientResult::SUCCESS, index};
             }
-            stateChanged.wait(lockGuard);
+            entryCommitted.at(index % 10).wait(lockGuard);
         }
     }
     return {ClientResult::NOT_LEADER, 0};
 }
 
 void
-RaftConsensus::requestVote(std::unique_lock<Mutex>& lockGuard, Peer& peer)
+RaftConsensus::replicateEntry2(Log::Entry& entry,
+                              std::unique_lock<Mutex>& lockGuard,
+                              ClientRequest request)
+{
+    if (state == State::LEADER && !exiting) {
+        entry.set_term(currentTerm);
+        append({&entry});
+        uint64_t index = log->getLastLogIndex();
+        std::shared_ptr<ClientRequest> reqP(new ClientRequest(std::move(request)));
+        blocked[index] = reqP;
+    } else {
+        Protocol::Client::Error error;
+        error.set_error_code(Protocol::Client::Error::NOT_LEADER);
+        request.rpc.returnError(error);
+    }
+}
+
+void
+RaftConsensus::requestVote(std::unique_lock<Mutex>& lockGuard, Peer& peer,
+                           uint64_t peerThreadId)
 {
     Protocol::Raft::RequestVote::Request request;
     request.set_server_id(serverId);
     request.set_term(currentTerm);
     request.set_last_log_term(getLastLogTerm());
     request.set_last_log_index(log->getLastLogIndex());
+
+    peer.requestVoteDone = true;
 
     Protocol::Raft::RequestVote::Response response;
     VERBOSE("requestVote start");
@@ -2956,6 +3021,7 @@ RaftConsensus::requestVote(std::unique_lock<Mutex>& lockGuard, Peer& peer)
         status = peer.callRPC(
                 Protocol::Raft::OpCode::REQUEST_VOTE,
                 request, response,
+                peerThreadId,
                 lockGuard);
     }
     else
@@ -2970,6 +3036,7 @@ RaftConsensus::requestVote(std::unique_lock<Mutex>& lockGuard, Peer& peer)
         case Peer::CallStatus::FAILED:
             peer.suppressBulkData = true;
             peer.backoffUntil = start + RPC_FAILURE_BACKOFF;
+            peer.requestVoteDone = false;
             return;
         case Peer::CallStatus::INVALID_REQUEST:
             PANIC("The server's RaftService doesn't support the RequestVote "
@@ -2980,6 +3047,7 @@ RaftConsensus::requestVote(std::unique_lock<Mutex>& lockGuard, Peer& peer)
         peer.exiting) {
         VERBOSE("ignore RPC result");
         // we don't care about result of RPC
+        peer.requestVoteDone = false;
         return;
     }
 
@@ -2987,6 +3055,7 @@ RaftConsensus::requestVote(std::unique_lock<Mutex>& lockGuard, Peer& peer)
         NOTICE("Received RequestVote response from server %lu in "
                "term %lu (this server's term was %lu)",
                 peer.serverId, response.term(), currentTerm);
+        peer.requestVoteDone = false;
         stepDown(response.term());
     } else {
         peer.requestVoteDone = true;
@@ -3075,6 +3144,8 @@ RaftConsensus::startNewElection()
         NOTICE("Running for election in term %lu",
                currentTerm + 1);
     }
+    for (auto it = entryCommitted.begin(); it != entryCommitted.end(); ++it)
+        it->notify_all();
     ++currentTerm;
     state = State::CANDIDATE;
     leaderId = 0;
@@ -3098,6 +3169,8 @@ void
 RaftConsensus::stepDown(uint64_t newTerm)
 {
     assert(currentTerm <= newTerm);
+    for (auto it = entryCommitted.begin(); it != entryCommitted.end(); ++it)
+        it->notify_all();
     if (currentTerm < newTerm) {
         VERBOSE("stepDown(%lu)", newTerm);
         currentTerm = newTerm;
@@ -3115,6 +3188,14 @@ RaftConsensus::stepDown(uint64_t newTerm)
             snapshotWriter->discard();
             snapshotWriter.reset();
         }
+        for (auto it = blocked.begin();
+             it != blocked.end();
+             ++it) {
+            Protocol::Client::Error error;
+            error.set_error_code(Protocol::Client::Error::NOT_LEADER);
+            it->second->rpc.returnError(error);
+        }
+        blocked.clear();
         state = State::FOLLOWER;
         printElectionState();
     } else {

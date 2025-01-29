@@ -31,6 +31,7 @@
 #include "Core/Mutex.h"
 #include "Core/Time.h"
 #include "RPC/ClientRPC.h"
+#include "RPC/ServerRPC.h"
 #include "Storage/Layout.h"
 #include "Storage/Log.h"
 #include "Storage/SnapshotFile.h"
@@ -97,6 +98,24 @@ typedef Clock::time_point TimePoint;
 typedef Core::Time::TimeBounds TimeBounds;
 
 typedef Core::Mutex Mutex;
+
+struct ClientRequest {
+    ClientRequest()
+        : rpc() {
+    }
+    ClientRequest(RPC::ServerRPC rpc)
+        : rpc(std::move(rpc)) {
+    }
+    ClientRequest(ClientRequest&& other)
+        : rpc(std::move(other.rpc)) {
+
+    }
+    ClientRequest& operator=(ClientRequest&& other) {
+        rpc = std::move(other.rpc);
+        return *this;
+    }
+    RPC::ServerRPC rpc;
+};
 
 /**
  * A base class for known servers in the cluster, including this process (see
@@ -320,6 +339,7 @@ class Peer : public Server {
     callRPC(Protocol::Raft::OpCode opCode,
             const google::protobuf::Message& request,
             google::protobuf::Message& response,
+            uint64_t peerThreadId,
             std::unique_lock<Mutex>& lockGuard);
 
     /**
@@ -470,7 +490,12 @@ class Peer : public Server {
      * Setting this member and canceling the RPC must be done while holding the
      * Raft lock; waiting on the RPC is done without holding that lock.
      */
-    RPC::ClientRPC rpc;
+    std::deque<RPC::ClientRPC> rpcs;
+
+    /**
+     * A thread that is used to send RPCs to the follower.
+     */
+    std::deque<std::thread> threads;
 
     // Peer is not copyable.
     Peer(const Peer&) = delete;
@@ -895,6 +920,7 @@ class RaftConsensus {
     typedef RaftConsensusInternal::Clock Clock;
     typedef RaftConsensusInternal::TimePoint TimePoint;
     typedef RaftConsensusInternal::TimeBounds TimeBounds;
+    typedef RaftConsensusInternal::ClientRequest ClientRequest;
 
     /**
      * This is returned by getNextEntry().
@@ -952,6 +978,8 @@ class RaftConsensus {
          * A handle to the snapshot file for entries of type 'SNAPSHOT'.
          */
         std::unique_ptr<Storage::SnapshotFile::Reader> snapshotReader;
+
+        ClientRequest request;
 
         /**
          * Cluster time when leader created entry/snapshot. This is valid for
@@ -1107,6 +1135,8 @@ class RaftConsensus {
      */
     std::pair<ClientResult, uint64_t> replicate(const Core::Buffer& operation);
 
+    void replicate2(const std::string& operation, ClientRequest request);
+
     /**
      * Change the cluster's configuration.
      * Returns successfully once operation completed and old servers are no
@@ -1254,7 +1284,7 @@ class RaftConsensus {
      * Initiate RPCs to a specific server as necessary.
      * One thread for each remote server calls this method (see Peer::thread).
      */
-    void peerThreadMain(std::shared_ptr<Peer> peer);
+    void peerThreadMain(std::shared_ptr<Peer> peer, uint64_t peerThreadId = 0);
 
     /**
      * Append advance state machine version entries to the log as leader once
@@ -1309,7 +1339,8 @@ class RaftConsensus {
      *      State used in communicating with the follower, building the RPC
      *      request, and processing its result.
      */
-    void appendEntries(std::unique_lock<Mutex>& lockGuard, Peer& peer);
+    void appendEntries(std::unique_lock<Mutex>& lockGuard, Peer& peer,
+                       uint64_t peerThreadId = 0);
 
     /**
      * Send an InstallSnapshot RPC to the server (containing part of a
@@ -1321,7 +1352,8 @@ class RaftConsensus {
      *      State used in communicating with the follower, building the RPC
      *      request, and processing its result.
      */
-    void installSnapshot(std::unique_lock<Mutex>& lockGuard, Peer& peer);
+    void installSnapshot(std::unique_lock<Mutex>& lockGuard, Peer& peer,
+                         uint64_t peerThreadId);
 
     /**
      * Transition to being a leader. This is called when a candidate has
@@ -1380,6 +1412,10 @@ class RaftConsensus {
     replicateEntry(Storage::Log::Entry& entry,
                    std::unique_lock<Mutex>& lockGuard);
 
+    void replicateEntry2(Storage::Log::Entry& entry,
+                         std::unique_lock<Mutex>& lockGuard,
+                         ClientRequest request);
+
     /**
      * Send a RequestVote RPC to the server. This is used by candidates to
      * request a server's vote and by new leaders to retrieve information about
@@ -1391,7 +1427,8 @@ class RaftConsensus {
      *      State used in communicating with the follower, building the RPC
      *      request, and processing its result.
      */
-    void requestVote(std::unique_lock<Mutex>& lockGuard, Peer& peer);
+    void requestVote(std::unique_lock<Mutex>& lockGuard, Peer& peer,
+                     uint64_t peerThreadId = 0);
 
     /**
      * Dumps serverId, currentTerm, state, leaderId, and votedFor to the debug
@@ -1556,6 +1593,12 @@ class RaftConsensus {
     mutable Core::ConditionVariable stateChanged;
 
     /**
+     * CV index % n notified when index is committed.
+     * All CVs notified when term changes or exiting is set.
+     */
+    mutable std::deque<Core::ConditionVariable> entryCommitted;
+
+    /**
      * Set to true when this class is about to be destroyed. When this is true,
      * threads must exit right away and no more RPCs should be sent or
      * processed.
@@ -1594,6 +1637,7 @@ class RaftConsensus {
      * set to true while holding #mutex; set to false without #mutex.
      */
     std::atomic<bool> leaderDiskThreadWorking;
+    mutable std::map<uint64_t, std::shared_ptr<ClientRequest>> blocked;
 
     /**
      * Defines the servers that are part of the cluster. See Configuration.
