@@ -921,10 +921,10 @@ RaftConsensus::Entry::Entry()
     , type(SKIP)
     , command()
     , snapshotReader()
+    , request()
     , clusterTime(0)
     , localTimeBounds()
     , term(0)
-    , request()
 {
 }
 
@@ -933,10 +933,10 @@ RaftConsensus::Entry::Entry(Entry&& other)
     , type(other.type)
     , command(std::move(other.command))
     , snapshotReader(std::move(other.snapshotReader))
+    , request(std::move(other.request))
     , clusterTime(other.clusterTime)
     , localTimeBounds(other.localTimeBounds)
     , term(other.term)
-    , request(std::move(other.request))
 {
 }
 
@@ -945,6 +945,8 @@ RaftConsensus::Entry::~Entry()
 }
 
 ////////// RaftConsensus //////////
+
+const int APPENDENTRIES_PIPELINE_SIZE = 100;
 
 RaftConsensus::RaftConsensus(Globals& globals)
     : LEASE_TIMEOUT_DELTA(std::chrono::milliseconds(
@@ -1023,7 +1025,7 @@ RaftConsensus::RaftConsensus(Globals& globals)
     , stepDownThread()
     , invariants(*this)
 {
-    for (uint64_t i = 0; i < 10; ++i)
+    for (uint64_t i = 0; i < APPENDENTRIES_PIPELINE_SIZE; ++i)
         entryCommitted.emplace_back();
 }
 
@@ -2359,7 +2361,7 @@ RaftConsensus::advanceCommitIndex()
         return;
     }
     for (uint64_t i = commitIndex + 1; i <= newCommitIndex; ++i) {
-        entryCommitted.at(i % 10).notify_all();
+        entryCommitted.at(i % APPENDENTRIES_PIPELINE_SIZE).notify_all();
     }
     commitIndex = newCommitIndex;
     VERBOSE("New commitIndex: %lu, [%lu, %lu]", 
@@ -2975,7 +2977,7 @@ RaftConsensus::replicateEntry(Log::Entry& entry,
                 VERBOSE("replicate succeeded");
                 return {ClientResult::SUCCESS, index};
             }
-            entryCommitted.at(index % 10).wait(lockGuard);
+            entryCommitted.at(index % APPENDENTRIES_PIPELINE_SIZE).wait(lockGuard);
         }
     }
     return {ClientResult::NOT_LEADER, 0};
