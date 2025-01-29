@@ -10,25 +10,28 @@ _logger = logging.getLogger("chart")
 
 def chart_network_latency():
     csv = pd.read_csv("network_latency_experiment.csv")
-    BARWIDTH = .1
+    BARWIDTH = .09
     LINEWIDTH = .01
     fig, ax = plt.subplots(figsize=(5, 3))
     ax.set(xlabel="one-way network latency (µs)")
     ax.tick_params(axis="x", bottom=False)
-
-    for offset, color, config, operationType in [
-        (-2, "C1", "inconsistent", "write"),
-        (-1, "C0", "inconsistent", "read"),
+    
+    # x-offset, color, config_name, operationType
+    combos = [
+        (-2.4, "C1", "inconsistent", "write"),
+        (-1.4, "C0", "inconsistent", "read"),
         (0, "C1", "lease", "write"),
         (1, "C0", "lease", "read"),
-        (2, "C1", "quorumCheckOnRead", "write"),
-        (3, "C0", "quorumCheckOnRead", "read"),
-    ]:
-        if config == "inconsistent":
+        (2.4, "C1", "quorum", "write"),
+        (3.4, "C0", "quorum", "read"),
+    ]
+
+    for offset, color, config_name, operationType in combos:
+        if config_name == "inconsistent":
             config_predicate = (csv["quorumCheckOnRead"] == False) & (
                 csv["leaseEnabled"] == False
             )
-        elif config == "quorumCheckOnRead":
+        elif config_name == "quorum":
             config_predicate = csv["quorumCheckOnRead"]
         else:
             config_predicate = (
@@ -71,39 +74,28 @@ def chart_network_latency():
 
     fig.legend(
         loc="upper center",
-        bbox_to_anchor=(0.5, 1),
+        bbox_to_anchor=(0.59, 1.03),
         ncol=2,
         handles=[Patch(color=color) for color in ["C1", "C0"]],
         handleheight=0.65,
         handlelength=0.65,
         labels=["write latency p90", "read latency p90"],
+        frameon=False,
     )
     arrow_x = csv["latencyMs"].min()
     arrow_y = csv[csv["latencyMs"] == 0]["p90latencyMicros"].max() / 1000
-    ax.text(
-        arrow_x - 2.5 * (BARWIDTH + 2 * LINEWIDTH),
-        arrow_y + 2,
-        r"$\leftarrow$ no lease",
-        horizontalalignment="left",
-        verticalalignment="bottom",
-        rotation="vertical",
-    )
-    ax.text(
-        arrow_x - 0.5 * (BARWIDTH + 2 * LINEWIDTH),
-        arrow_y + 2,
-        r"$\leftarrow$ lease",
-        horizontalalignment="left",
-        verticalalignment="bottom",
-        rotation="vertical",
-    )
-    ax.text(
-        arrow_x + 1.5 * (BARWIDTH + 2 * LINEWIDTH),
-        arrow_y + 2,
-        r"$\leftarrow$ quorum",
-        horizontalalignment="left",
-        verticalalignment="bottom",
-        rotation="vertical",
-    )
+    
+    for i in range(0, len(combos), 2):
+        offset, color, config_name, operationType = combos[i]
+        ax.text(
+            arrow_x + (offset - .5) * (BARWIDTH + 2 * LINEWIDTH),
+            arrow_y + 2,
+            rf"$\leftarrow$ {config_name}",
+            horizontalalignment="left",
+            verticalalignment="bottom",
+            rotation="vertical",
+        )
+
     fig.text(0.002, 0.55, "milliseconds", va="center", rotation="vertical")
 
     # Remove chart borders
