@@ -122,10 +122,18 @@ def run_benchmark(options: BenchmarkOptions, stats: Stats):
         """,
         )
 
+    title("CREATE DATA")
+    # The operation type is "write" to create some data. The real benchmark's operation is "read".
+    run_command(
+        f"./build/Examples/Benchmark --cluster={','.join(SERVERS)} "
+        f"--size={options.size} --threads={options.threads} --operation-type=write "
+        f"--timeout=30s --operations={options.threads}"
+    )
+
     title("BENCHMARK")
     run_command(
         f"./build/Examples/Benchmark --cluster={','.join(SERVERS)} "
-        f"--size={options.size} --threads={options.threads} --operation-type={options.operationType} "
+        f"--size={options.size} --threads={options.threads} --operation-type=read "
         f"--timeout=30s --operations={options.operations} --resultsFile=one_result.txt"
     )
 
@@ -164,18 +172,16 @@ if __name__ == "__main__":
         (False, True, True, True),
     ]:
         for latencyMs in (0, 1, 2, 3, 4, 5, 6):
-            for operationType in ("read", "write"):
-                options = BenchmarkOptions(
-                    latencyMs=latencyMs,
-                    operationType=operationType,
-                    quorumCheckOnRead=quorumCheckOnRead,
-                    leaseEnabled=leaseEnabled,
-                    deferCommitEnabled=deferCommitEnabled,
-                    inheritLeaseEnabled=inheritLeaseEnabled,
-                )
+            options = BenchmarkOptions(
+                latencyMs=latencyMs,
+                quorumCheckOnRead=quorumCheckOnRead,
+                leaseEnabled=leaseEnabled,
+                deferCommitEnabled=deferCommitEnabled,
+                inheritLeaseEnabled=inheritLeaseEnabled,
+            )
 
-                n_already = len([r for r in stats.rows if r.options == options])
-                n_needed = max(0, args.trials - n_already)
-                print(f"{n_needed} trials for {options}")
-                for _ in range(n_needed):
-                    run_benchmark(options, stats)
+            n_already = len([r for r in stats.rows if r.options == options])
+            n_needed = max(0, args.trials - n_already)
+            print(f"{n_needed} trials for {options}")
+            for _ in range(n_needed):
+                run_benchmark(options, stats)

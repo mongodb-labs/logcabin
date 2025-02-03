@@ -15,23 +15,20 @@ _logger = logging.getLogger("chart")
 
 def chart_network_latency():
     csv = pd.read_csv("network_latency_experiment.csv")
-    BARWIDTH = 0.09
+    BARWIDTH = 0.15
     LINEWIDTH = 0.01
     fig, ax = plt.subplots(figsize=(5, 3))
     ax.set(xlabel="one-way network latency (µs)")
     ax.tick_params(axis="x", bottom=False)
 
-    # x-offset, color, config_name, operationType
+    # x-offset, color, config_name
     combos = [
-        (-2.4, "C1", "inconsistent", "write"),
-        (-1.4, "C0", "inconsistent", "read"),
-        (0, "C1", "lease", "write"),
-        (1, "C0", "lease", "read"),
-        (2.4, "C1", "quorum", "write"),
-        (3.4, "C0", "quorum", "read"),
+        (-1.5, "C0", "inconsistent"),
+        (0, "C0", "lease"),
+        (1.5, "C0", "quorum"),
     ]
 
-    for offset, color, config_name, operationType in combos:
+    for offset, color, config_name in combos:
         if config_name == "inconsistent":
             config_predicate = (csv["quorumCheckOnRead"] == False) & (
                 csv["leaseEnabled"] == False
@@ -45,14 +42,12 @@ def chart_network_latency():
                 & (csv["inheritLeaseEnabled"])
             )
 
-        op_predicate = csv["operationType"] == operationType
         column = "p90latencyNanos"
         df = (
-            csv[config_predicate & op_predicate]
+            csv[config_predicate]
             .groupby(
                 [
                     "latencyMs",
-                    "operationType",
                     "quorumCheckOnRead",
                     "leaseEnabled",
                     "deferCommitEnabled",
@@ -80,17 +75,17 @@ def chart_network_latency():
     fig.legend(
         loc="upper center",
         ncol=2,
-        handles=[Patch(color=color) for color in ["C1", "C0"]],
+        handles=[Patch(color="C0")],
         handleheight=0.65,
         handlelength=0.65,
-        labels=["write latency p90", "read latency p90"],
+        labels=["read latency p90"],
         frameon=False,
     )
     arrow_x = csv["latencyMs"].min()
     arrow_y = csv[csv["latencyMs"] == 0]["p90latencyNanos"].max() / 1_000_000
 
-    for i in range(0, len(combos), 2):
-        offset, color, config_name, operationType = combos[i]
+    for i in range(len(combos)):
+        offset, color, config_name = combos[i]
         ax.text(
             arrow_x + (offset - 0.5) * (BARWIDTH + 2 * LINEWIDTH),
             arrow_y + 0.2,

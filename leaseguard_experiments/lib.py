@@ -42,7 +42,6 @@ def dataclass_fieldnames(dataclass_type):
 class BenchmarkOptions:
     # camelCase for consistency with the names in LogCabin config file and C++.
     latencyMs: int = 0
-    operationType: str = "read"
     quorumCheckOnRead: bool = False
     leaseEnabled: bool = False
     deferCommitEnabled: bool = False
@@ -54,10 +53,6 @@ class BenchmarkOptions:
     delta: int = 500  # Milliseconds.
 
     def __post_init__(self):
-        if self.operationType not in {"read", "write"}:
-            raise ValueError(
-                f"operationType should be 'read' or 'write', not '{self.operationType}'"
-            )
         if self.deferCommitEnabled and not self.leaseEnabled:
             raise ValueError("deferCommitEnabled requires leaseEnabled")
         if self.inheritLeaseEnabled and not self.leaseEnabled:
