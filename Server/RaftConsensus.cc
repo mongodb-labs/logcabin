@@ -1663,11 +1663,15 @@ RaftConsensus::replicate(const Core::Buffer& operation)
         while (true) {
             auto leaseStartAt = leaderLeaseStart();
             auto localNow = TimeBounds::localNow();
-            if (leaseStartAt >= localNow.earliest) {
+            if (leaseStartAt < localNow.earliest) {
+                VERBOSE("not waiting for lease");
                 break;
             }
             
-            stateChanged.wait(lockGuard);
+            VERBOSE("waiting for lease, now %s, waiting for %lu", 
+                    localNow.toString().c_str(), leaseStartAt);
+            auto waitUntil = Clock::now() + std::chrono::milliseconds(100);
+            stateChanged.wait_until(lockGuard, waitUntil);
         }
     }
 
@@ -1946,8 +1950,8 @@ RaftConsensus::snapshotDone(
         configurationManager->setSnapshot(c.first, c.second);
     }
 
-    NOTICE("Completed snapshot through log index %lu (inclusive)",
-           lastSnapshotIndex);
+    NOTICE("Completed snapshot through log index %lu (inclusive) with time bounds %s",
+           lastSnapshotIndex, lastSnapshotLocalTimeBounds.toString().c_str());
 
     // It may be beneficial to defer discarding entries if some followers are
     // a little bit slow, to avoid having to send them a snapshot when a few
@@ -2195,13 +2199,13 @@ RaftConsensus::extendLeaseThreadMain()
     while (!exiting) {
         auto localNow = TimeBounds::localNow();
         if (state == State::LEADER && localNow.latest - lastExtended >= freq) {
-            NOTICE("extend lease");
             Log::Entry entry;
             entry.set_term(currentTerm);
             entry.set_type(Protocol::Raft::EntryType::NOOP);
             entry.set_cluster_time(clusterClock.leaderStamp());
             setLocalTime(entry);
             append({&entry});
+            lastExtended = localNow.latest;
         }
         
         auto microseconds = freq / 1000;
@@ -3287,10 +3291,11 @@ uint64_t RaftConsensus::leaderLeaseStart() const
         const Log::Entry &entry = log->getEntry(lastEntryInPreviousTermIndex);
         assert(entry.term() < currentTerm);
         t = TimeBounds(entry);
-        VERBOSE("Found term %lu index %lu entry with local time %s",
-                entry.term(), entry.index(), t.toString().c_str());
-    } else if (lastSnapshotTerm < currentTerm) {
-        VERBOSE("Using last snapshot with local time %s",
+        VERBOSE("Current term %lu, found term %lu index %lu entry with local time %s",
+                currentTerm, entry.term(), entry.index(), t.toString().c_str());
+    } else if (lastSnapshotTerm < currentTerm && lastSnapshotIndex > 0) {
+        VERBOSE("Current term %lu, last log index %lu with term %lu, using last snapshot with" 
+                " local time %s", currentTerm, log->getLastLogIndex(), lastSnapshotTerm,
                 lastSnapshotLocalTimeBounds.toString().c_str());
         t = lastSnapshotLocalTimeBounds;
     } else {
