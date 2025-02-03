@@ -34,4 +34,8 @@ env.Default([
     env.Program("ConsistencyTest",
                 ["ConsistencyTest.cc", "#build/liblogcabin.a"],
                 LIBS = libs),
+
+    env.Program("UnavailabilityTest",
+                ["UnavailabilityTest.cc", "#build/liblogcabin.a"],
+                LIBS = libs),
 ])

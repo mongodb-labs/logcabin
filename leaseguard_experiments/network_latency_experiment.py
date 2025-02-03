@@ -4,12 +4,19 @@ import argparse
 import csv
 import os
 import time
-import subprocess
-from dataclasses import dataclass, asdict, fields
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Any
 
-import paramiko
+from lib import (
+    BenchmarkOptions,
+    BenchmarkResult,
+    dataclass_fieldnames,
+    dataclass_from_row,
+    run_command,
+    run_ssh_command,
+    title,
+    write_config_files
+)
 
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -23,85 +30,13 @@ args = parser.parse_args()
 SERVERS = args.servers.split(",")
 
 
-def deserialize_field(field_type: Any, value: str) -> Any:
-    """Convert a string value to the appropriate type."""
-    if field_type == int:
-        return int(value)
-    elif field_type == float:
-        return float(value)
-    elif field_type == str:
-        return value
-    elif field_type == list[str]:
-        return eval(value)
-    elif field_type == bool:
-        return value == "True"
-    elif field_type == datetime:
-        return datetime.fromisoformat(value)
-    else:
-        raise ValueError(f"Unsupported type: {field_type}")
-
-
-@dataclass
-class BenchmarkOptions:
-    # camelCase for consistency with the names in LogCabin config file and C++.
-    latencyMs: int = 0
-    operationType: str = ""
-    quorumCheckOnRead: bool = False
-    leaseEnabled: bool = False
-    deferCommitEnabled: bool = False
-    inheritLeaseEnabled: bool = False
-    size: int = 1024
-    threads: int = 1
-    operations: int = 100000
-
-    def __post_init__(self):
-        if self.operationType not in {"read", "write"}:
-            raise ValueError(
-                f"operationType should be 'read' or 'write', not '{self.operationType}'"
-            )
-        if self.deferCommitEnabled and not self.leaseEnabled:
-            raise ValueError("deferCommitEnabled requires leaseEnabled")
-        if self.inheritLeaseEnabled and not self.leaseEnabled:
-            raise ValueError("inheritLeaseEnabled requires leaseEnabled")
-
-
 class Stats:
     CSV_FILE_PATH = os.path.dirname(__file__) + "/network_latency_experiment.csv"
 
     @dataclass
-    class Row(BenchmarkOptions):
-        # Must have default vals since they follow BenchmarkOptions' fields.
-        recordedAt: datetime = None
-        opsPerSec: float = None
-        p50latencyMicros: float = None
-        p90latencyMicros: float = None
-        p95latencyMicros: float = None
-
-        @staticmethod
-        def from_benchmark_options(
-            options: BenchmarkOptions,
-            opsPerSec: float,
-            p50latencyMicros: float,
-            p90latencyMicros: float,
-            p95latencyMicros: float,
-        ) -> "Stats.Row":
-            data = asdict(options)
-
-            return Stats.Row(
-                **data,
-                recordedAt=datetime.now().isoformat(),
-                opsPerSec=opsPerSec,
-                p50latencyMicros=p50latencyMicros,
-                p90latencyMicros=p90latencyMicros,
-                p95latencyMicros=p95latencyMicros,
-            )
-
-        def matches(self, options: BenchmarkOptions):
-            for f in fields(options):
-                if getattr(self, f.name) != getattr(options, f.name):
-                    return False
-
-            return True
+    class Row:
+        options: BenchmarkOptions
+        result: BenchmarkResult
 
     def __init__(self):
         self.rows: list[Stats.Row] = []
@@ -113,101 +48,32 @@ class Stats:
                 if not reader.fieldnames:
                     raise ValueError("CSV file has no columns.")
 
-                for f in fields(Stats.Row):
-                    if f.name not in reader.fieldnames:
-                        raise ValueError(f"Missing required column: {f}")
-
                 for row in reader:
                     self.rows.append(
                         Stats.Row(
-                            **{
-                                f.name: deserialize_field(f.type, row[f.name])
-                                for f in fields(Stats.Row)
-                            }
+                            options=dataclass_from_row(BenchmarkOptions, row),
+                            result=dataclass_from_row(BenchmarkResult, row),
                         )
                     )
 
-    def append(self, **kwargs):
-        self.rows.append(Stats.Row.from_benchmark_options(**kwargs))
+    def append(self, options: BenchmarkOptions, result: BenchmarkResult):
+        self.rows.append(Stats.Row(options=options, result=result))
 
     def save(self):
         with open(Stats.CSV_FILE_PATH, mode="w") as f:
-            writer = csv.DictWriter(f, fieldnames=(f.name for f in fields(Stats.Row)))
+            writer = csv.DictWriter(
+                f,
+                fieldnames=(
+                    dataclass_fieldnames(BenchmarkOptions)
+                    + dataclass_fieldnames(BenchmarkResult)
+                ),
+            )
             writer.writeheader()
-            writer.writerows(asdict(row) for row in self.rows)
-
-
-def title(t):
-    print(f"\n==== {t} {('======'*10)[:75 - len(t)]}\n")
-
-
-def run_command(command):
-    process = subprocess.Popen(
-        command,
-        shell=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        universal_newlines=True,
-    )
-    try:
-        for line in process.stdout:
-            print(line, end="")
-    finally:
-        process.wait()
-
-    if process.returncode:
-        raise subprocess.CalledProcessError(process.returncode, command)
-
-
-def run_ssh_command(host, command):
-    client = paramiko.SSHClient()
-    # Automatically add the server's host key if it's not already known
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    try:
-        client.connect(
-            hostname=host,
-            username="ubuntu",
-            key_filename="/home/ubuntu/.ssh/jesse-2024.pem",
-        )
-        # set -e to stop on error
-        stdin, stdout, stderr = client.exec_command(f"set -e\n{command}")
-        for s in stdout, stderr:
-            out = s.read().decode().strip()
-            if out:
-                print(out)
-        exit_code = stdout.channel.recv_exit_status()
-        if exit_code:
-            raise subprocess.CalledProcessError(exit_code, f"{host} {command}")
-    finally:
-        client.close()
+            writer.writerows(asdict(row.options) | asdict(row.result) for row in self.rows)
 
 
 def run_benchmark(options: BenchmarkOptions, stats: Stats):
-    def bul(b: bool):
-        return "true" if b else "false"
-
-    for server_id, addr in enumerate(SERVERS, start=1):
-        with open(f"conf{server_id}.conf", "w") as f:
-            # Write the conf file locally, sshfs will copy it to all servers.
-            f.write(
-                f"""\
-    serverId = {server_id}
-    listenAddresses = {addr}
-    clusterUUID = foo
-    storagePath = /tmp/logcabin
-    logPolicy = NOTICE
-    snapshotMinLogSize = 99999999999
-    tcpConnectTimeoutMilliseconds = 10000
-    electionTimeoutMilliseconds = 500
-    delta = 500
-    quorumCheckOnRead = {bul(options.quorumCheckOnRead)}
-    leaseEnabled = {bul(options.leaseEnabled)}
-    deferCommitEnabled = {bul(options.deferCommitEnabled)}
-    inheritLeaseEnabled = {bul(options.inheritLeaseEnabled)}
-    """
-            )
-
-    time.sleep(5)
+    write_config_files(SERVERS, options)
 
     for server_id, addr in enumerate(SERVERS, start=1):
         title(f"SETUP {addr}")
@@ -277,10 +143,12 @@ def run_benchmark(options: BenchmarkOptions, stats: Stats):
     row = next(reader)
     stats.append(
         options=options,
-        opsPerSec=float(row["opsPerSec"]),
-        p50latencyMicros=float(row["p50latencyMicros"]),
-        p90latencyMicros=float(row["p90latencyMicros"]),
-        p95latencyMicros=float(row["p95latencyMicros"]),
+        result=BenchmarkResult(
+            opsPerSec=float(row["opsPerSec"]),
+            p50latencyNanos=float(row["p50latencyNanos"]),
+            p90latencyNanos=float(row["p90latencyNanos"]),
+            p95latencyNanos=float(row["p95latencyNanos"]),
+        )
     )
 
     stats.save()
@@ -306,7 +174,7 @@ if __name__ == "__main__":
                     inheritLeaseEnabled=inheritLeaseEnabled,
                 )
 
-                n_already = len([r for r in stats.rows if r.matches(options)])
+                n_already = len([r for r in stats.rows if r.options == options])
                 n_needed = max(0, args.trials - n_already)
                 print(f"{n_needed} trials for {options}")
                 for _ in range(n_needed):

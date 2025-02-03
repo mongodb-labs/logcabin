@@ -1,21 +1,26 @@
+import argparse
 import logging
 
 import matplotlib.font_manager as font_manager
+from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.patches import Patch
+
+from lib import BenchmarkOptions
+
 
 _logger = logging.getLogger("chart")
 
 
 def chart_network_latency():
     csv = pd.read_csv("network_latency_experiment.csv")
-    BARWIDTH = .09
-    LINEWIDTH = .01
+    BARWIDTH = 0.09
+    LINEWIDTH = 0.01
     fig, ax = plt.subplots(figsize=(5, 3))
     ax.set(xlabel="one-way network latency (µs)")
     ax.tick_params(axis="x", bottom=False)
-    
+
     # x-offset, color, config_name, operationType
     combos = [
         (-2.4, "C1", "inconsistent", "write"),
@@ -41,7 +46,7 @@ def chart_network_latency():
             )
 
         op_predicate = csv["operationType"] == operationType
-        column = "p90latencyMicros"
+        column = "p90latencyNanos"
         df = (
             csv[config_predicate & op_predicate]
             .groupby(
@@ -61,10 +66,10 @@ def chart_network_latency():
             .reset_index()
         )
 
-        # "latencyMs" is the artificially added network latency.
+        # The x-axis "latencyMs" is the artificially added network latency.
         ax.bar(
             df["latencyMs"] + offset * (BARWIDTH + LINEWIDTH * 2),
-            df[column] / 1000,  # convert micros to millis
+            df[column] / 1_000_000,  # convert nanos to millis
             BARWIDTH,
             label=column,
             color=color,
@@ -74,7 +79,6 @@ def chart_network_latency():
 
     fig.legend(
         loc="upper center",
-        bbox_to_anchor=(0.59, 1.03),
         ncol=2,
         handles=[Patch(color=color) for color in ["C1", "C0"]],
         handleheight=0.65,
@@ -83,13 +87,13 @@ def chart_network_latency():
         frameon=False,
     )
     arrow_x = csv["latencyMs"].min()
-    arrow_y = csv[csv["latencyMs"] == 0]["p90latencyMicros"].max() / 1000
-    
+    arrow_y = csv[csv["latencyMs"] == 0]["p90latencyNanos"].max() / 1_000_000
+
     for i in range(0, len(combos), 2):
         offset, color, config_name, operationType = combos[i]
         ax.text(
-            arrow_x + (offset - .5) * (BARWIDTH + 2 * LINEWIDTH),
-            arrow_y + 2,
+            arrow_x + (offset - 0.5) * (BARWIDTH + 2 * LINEWIDTH),
+            arrow_y + 0.2,
             rf"$\leftarrow$ {config_name}",
             horizontalalignment="left",
             verticalalignment="bottom",
@@ -109,11 +113,145 @@ def chart_network_latency():
     _logger.info(f"Created {chart_path}")
 
 
+def chart_unavailability():
+    from unavailability_experiment import (
+        OPTIONS,
+        ELECTION_TIMEOUT_MS,
+        KILL_LEADER_TIME_MS,
+        LEASE_TIMEOUT_MS,
+    )
+
+    csv = pd.read_csv("unavailability_experiment.csv")
+    fig, axes = plt.subplots(len(OPTIONS), 1, sharex=True, sharey=True, figsize=(5, 5))
+
+    def resample_data(options: BenchmarkOptions):
+        df = csv[
+            (csv["quorumCheckOnRead"] == options.quorumCheckOnRead)
+            & (csv["leaseEnabled"] == options.leaseEnabled)
+            & (csv["inheritLeaseEnabled"] == options.inheritLeaseEnabled)
+            & (csv["deferCommitEnabled"] == options.deferCommitEnabled)
+        ].copy()
+        interval = 10_000_000  # 10ms in nanos.
+        df["time_bin"] = (df["recordedAtNanos"] // interval) * interval
+        df_resampled = (
+            df.groupby(["time_bin", "operationType"])
+            .size()
+            .unstack(fill_value=0)
+            .rename(columns={"read": "reads", "write": "writes"})
+            .reset_index()
+        )
+        # Interpolate missing time_bin values
+        all_time_bins = pd.DataFrame(
+            {
+                "time_bin": range(
+                    df["time_bin"].min(), df["time_bin"].max() + interval, interval
+                )
+            }
+        )
+        df_resampled = all_time_bins.merge(
+            df_resampled, on="time_bin", how="left"
+        ).fillna(0)
+        return df_resampled
+
+    dfs = {name: resample_data(options) for name, options in OPTIONS.items()}
+    y_lim = max(df["reads"].max() for df in dfs.values())
+    axes[-1].set(xlabel=r"time in milliseconds $\rightarrow$")
+
+    for i, (name, df) in enumerate(dfs.items()):
+        ax = axes[i]
+        options = OPTIONS[name]
+        x_min = df["time_bin"].min()
+        # Remove borders
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        if len(df) > 0:
+            for column in ["reads", "writes"]:
+                ax.plot(
+                    (df["time_bin"] - x_min) / 1_000_000,
+                    df[column],
+                    label=column,
+                )
+                ax.set_ylim(0, y_lim)
+
+        # Leader crash.
+        ax.axvline(x=KILL_LEADER_TIME_MS, color="red", linestyle="dotted")
+        # New leader elected.
+        ax.axvline(
+            x=KILL_LEADER_TIME_MS + ELECTION_TIMEOUT_MS,
+            color="green",
+            linestyle="dotted",
+        )
+        if options.leaseEnabled:
+            # Old lease expires.
+            ax.axvline(
+                x=KILL_LEADER_TIME_MS + LEASE_TIMEOUT_MS,
+                color="purple",
+                linestyle="dotted",
+            )
+
+        ax.text(
+            1.02,
+            0.5,
+            name,
+            va="center",
+            ha="center",
+            rotation="vertical",
+            transform=ax.transAxes,
+        )
+
+    axes[0].text(
+        KILL_LEADER_TIME_MS + 50,
+        int(y_lim * 0.85),
+        r"$\leftarrow$ leader crash",
+        color="red",
+        bbox=dict(facecolor="white", edgecolor="none"),
+    )
+    axes[0].text(
+        KILL_LEADER_TIME_MS + ELECTION_TIMEOUT_MS + 50,
+        int(y_lim * 0.6),
+        r"$\leftarrow$ new leader elected",
+        color="green",
+    )
+    axes[2].text(
+        KILL_LEADER_TIME_MS + LEASE_TIMEOUT_MS + 50,
+        int(y_lim * 0.75),
+        r"$\leftarrow$ old lease expires",
+        color="purple",
+        bbox=dict(facecolor="white", edgecolor="none"),
+    )
+    fig.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.005),
+        ncol=2,
+        handles=[Line2D([0], [0], color=color) for color in ["C1", "C0"]],
+        labels=["writes", "reads"],
+    )
+    fig.text(0.002, 0.5, "operations per millisecond", va="center", rotation="vertical")
+    fig.tight_layout()
+    fig.subplots_adjust(hspace=0.4, top=0.92)
+    chart_path = "unavailability_experiment.pdf"
+    fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
+    _logger.info(f"Created {chart_path}")
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("charts", nargs="*", help="Which charts to make")
+    args = parser.parse_args()
+
     logging.basicConfig(level=logging.INFO)
     plt.rcParams.update({"font.size": 12})
-    font_path = "cmunrm.ttf"  # Computer Modern Roman, like Latex's default.
+    font_path = "cmunrm.ttf"  # Computer Modern Roman, like Latex"s default.
     font_manager.fontManager.addfont(font_path)
     font_properties = font_manager.FontProperties(fname=font_path)
     plt.rcParams["font.family"] = font_properties.get_name()
-    chart_network_latency()
+
+    chart_funcs = {
+        "network_latency": chart_network_latency,
+        "unavailability": chart_unavailability,
+    }
+
+    for chart_name, chart_func in chart_funcs.items():
+        if chart_name in args.charts or args.charts == []:
+            chart_funcs[chart_name]()

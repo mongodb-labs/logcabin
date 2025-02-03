@@ -327,7 +327,7 @@ void operationThreadMain(uint64_t id, const OptionParser &options, Tree tree,
 
         auto end = std::chrono::high_resolution_clock::now();
         uint64_t latency =
-            std::chrono::duration_cast<std::chrono::microseconds>(end - start)
+            std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
                 .count();
         result.latencies.push_back(latency);
     }
@@ -414,7 +414,7 @@ main(int argc, char** argv)
         if (options.resultsFileName != "")
         {
             std::ofstream f(options.resultsFileName);
-            f << "opsPerSec,p50latencyMicros,p90latencyMicros,p95latencyMicros"
+            f << "opsPerSec,p50latencyNanos,p90latencyNanos,p95latencyNanos"
               << std::endl;
             auto sec = static_cast<double>(endNanos - startNanos) / 1e9;
             f << (static_cast<double>(totalOperationsDone) / sec) << ",";
