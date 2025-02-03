@@ -227,6 +227,9 @@ class OptionParser {
             << std::endl << space
             << "log."
             << std::endl
+
+            << ospace("stepdown")
+            << "Demote the current leader"
             << std::endl;
 
         std::cout << "Options:" << std::endl;
@@ -328,6 +331,7 @@ class ServerControl {
     DEFINE_RPC(SnapshotControl,        SNAPSHOT_CONTROL)
     DEFINE_RPC(SnapshotInhibitGet,     SNAPSHOT_INHIBIT_GET)
     DEFINE_RPC(SnapshotInhibitSet,     SNAPSHOT_INHIBIT_SET)
+    DEFINE_RPC(Stepdown,               STEPDOWN)
 
 #undef DEFINE_RPC
 
@@ -479,6 +483,12 @@ main(int argc, char** argv)
                 server.ServerStatsDump(request, response);
                 return 0;
             }
+        } else if (options.at(0) == "stepdown") {
+            options.done();
+            Proto::Stepdown::Request request;
+            Proto::Stepdown::Response response;
+            server.Stepdown(request, response);
+            return 0; 
         }
         options.usageError("Unknown command");
 

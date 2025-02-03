@@ -40,6 +40,7 @@ enum OpCode {
     SNAPSHOT_INHIBIT_GET = 10;
     SNAPSHOT_INHIBIT_SET = 11;
     DEBUG_MAKE_NETWORK_PARTITION = 12;
+    STEPDOWN = 13;
 };
 
 /**
@@ -259,6 +260,21 @@ message SnapshotInhibitSet {
          * automated snapshots ever.
          */
         optional uint64 nanoseconds = 1;
+    }
+    message Response {
+        /**
+         * This field will be present if any error occurred and not present
+         * otherwise.
+         */
+        optional string error = 1;
+    }
+}
+
+/**
+ * Stepdown RPC: Make the server a follower for at least 2 * electionTimeout.
+ */
+message Stepdown {
+    message Request {
     }
     message Response {
         /**

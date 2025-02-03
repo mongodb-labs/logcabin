@@ -64,6 +64,7 @@ class ControlService : public RPC::Service {
     void snapshotControl(RPC::ServerRPC rpc);
     void snapshotInhibitGet(RPC::ServerRPC rpc);
     void snapshotInhibitSet(RPC::ServerRPC rpc);
+    void stepdown(RPC::ServerRPC rpc);
 
     /**
      * The LogCabin daemon's top-level objects.

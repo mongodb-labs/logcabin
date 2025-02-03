@@ -1210,6 +1210,16 @@ class RaftConsensus {
     }
 
     /**
+     * Transition to being a follower. This is called when we
+     * receive an RPC request with newer term, receive an RPC response
+     * indicating our term is stale, or discover a current leader while a
+     * candidate. In this last case, newTerm will be the same as currentTerm.
+     * This will call setElectionTimer for you if no election timer is
+     * currently set.
+     */
+    void stepDown(uint64_t newTerm);
+
+    /**
      * The lease timeout, named delta for consistency with the Davis/Demirbas
      * paper.
      */
@@ -1451,16 +1461,6 @@ class RaftConsensus {
      * leader.
      */
     void startNewElection();
-
-    /**
-     * Transition to being a follower. This is called when we
-     * receive an RPC request with newer term, receive an RPC response
-     * indicating our term is stale, or discover a current leader while a
-     * candidate. In this last case, newTerm will be the same as currentTerm.
-     * This will call setElectionTimer for you if no election timer is
-     * currently set.
-     */
-    void stepDown(uint64_t newTerm);
 
     /**
      * Persist critical state, such as the term and the vote, to stable

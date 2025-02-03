@@ -78,6 +78,9 @@ ControlService::handleRPC(RPC::ServerRPC rpc)
         case OpCode::SNAPSHOT_INHIBIT_SET:
             snapshotInhibitSet(std::move(rpc));
             break;
+        case OpCode::STEPDOWN:
+            stepdown(std::move(rpc));
+            break;
         default:
             WARNING("Client sent request with bad op code (%u) to "
                     "ControlService", rpc.getOpCode());
@@ -263,6 +266,16 @@ ControlService::snapshotInhibitSet(RPC::ServerRPC rpc)
     rpc.reply(response);
 }
 
+void
+ControlService::stepdown(RPC::ServerRPC rpc)
+{
+    // TODO: remain stepped down for a while
+    PRELUDE(Stepdown);
+    auto &raft = *globals.raft;
+    // The term could be increased by other events concurrently but that's ok.
+    raft.stepDown(raft.getCurrentTerm() + 1);
+    rpc.reply(response);
+}
 
 } // namespace LogCabin::Server
 } // namespace LogCabin
