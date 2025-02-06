@@ -958,6 +958,7 @@ RaftConsensus::RaftConsensus(Globals& globals)
             globals.config.read<uint64_t>(
                 "electionTimeoutMilliseconds",
                 500)))
+    , ELECTABLE(globals.config.read<bool>("electable", true))
     , HEARTBEAT_PERIOD(
         globals.config.keyExists("heartbeatPeriodMilliseconds")
             ? std::chrono::nanoseconds(
@@ -1622,8 +1623,10 @@ RaftConsensus::handleRequestVote(
 
     if (request.term() > currentTerm) {
         NOTICE("Received RequestVote request from server %lu in term %lu "
-               "(this server's term was %lu)",
-                request.server_id(), request.term(), currentTerm);
+               "(this server's term was %lu), request.last_log_term = %lu, request.last_log_index "
+               "= %lu, my lastLogTerm = %lu, my lastLogIndex = %lu",
+               request.server_id(), request.term(), currentTerm, request.last_log_term(),
+               request.last_log_index(), lastLogTerm, lastLogIndex);
         stepDown(request.term());
     }
 
@@ -1641,6 +1644,12 @@ RaftConsensus::handleRequestVote(
             votedFor = request.server_id();
             updateLogMetadata();
             printElectionState();
+        }
+        else
+        {
+            NOTICE(
+                "Rejecting vote request from server %lu in term %lu, logIsOk = %u,  votedFor = %lu",
+                request.server_id(), currentTerm, logIsOk, votedFor);
         }
     }
 
@@ -3084,10 +3093,21 @@ RaftConsensus::requestVote(std::unique_lock<Mutex>& lockGuard, Peer& peer,
 void
 RaftConsensus::setElectionTimer()
 {
-    std::chrono::nanoseconds duration(
-        Core::Random::randomRange(
+    std::chrono::nanoseconds duration;
+
+    if (globals.electionTimeoutRandomizationDisabled)
+    {
+        duration = std::chrono::nanoseconds(Core::Random::randomRange(
+            uint64_t(std::chrono::nanoseconds(ELECTION_TIMEOUT).count()),
+            uint64_t(std::chrono::nanoseconds(ELECTION_TIMEOUT).count() * 1.01)));
+    }
+    else
+    {
+        duration = std::chrono::nanoseconds(Core::Random::randomRange(
             uint64_t(std::chrono::nanoseconds(ELECTION_TIMEOUT).count()),
             uint64_t(std::chrono::nanoseconds(ELECTION_TIMEOUT).count()) * 2));
+    }
+
     VERBOSE("Will become candidate in %s",
             Core::StringUtil::toString(duration).c_str());
     startElectionAt = Clock::now() + duration;
@@ -3123,6 +3143,13 @@ RaftConsensus::printElectionState() const
 void
 RaftConsensus::startNewElection()
 {
+    if (!ELECTABLE)
+    {
+        // Reset the timer to avoid spinning, and go back to sleep.
+        setElectionTimer();
+        return;
+    }
+
     if (configuration->id == 0) {
         // Don't have a configuration: go back to sleep.
         setElectionTimer();

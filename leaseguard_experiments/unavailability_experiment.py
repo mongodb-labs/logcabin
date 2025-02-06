@@ -2,6 +2,7 @@
 
 import argparse
 import os.path
+import subprocess
 import threading
 import time
 from datetime import datetime
@@ -23,15 +24,10 @@ ELECTION_TIMEOUT_MS = 500
 LEASE_TIMEOUT_MS = 2 * ELECTION_TIMEOUT_MS
 # Trigger regicide part way into the experiment.
 KILL_LEADER_TIME_MS = ELECTION_TIMEOUT_MS
-CSV_PATH = (
-    f"leaseguard_experiments/{os.path.splitext(os.path.basename(__file__))[0]}.csv"
-)
 
 
-OPTIONS = {}
-
-
-def _make_options():  # lease without deferCommit hangs
+def _make_options():
+    options = {}
     for (
         quorumCheckOnRead,
         leaseEnabled,
@@ -45,25 +41,35 @@ def _make_options():  # lease without deferCommit hangs
         (False, True, True, False, "defer\ncommit"),
         (False, True, True, True, "inherit\nlease"),
     ]:
-        OPTIONS[name] = BenchmarkOptions(
+        options[name] = BenchmarkOptions(
             quorumCheckOnRead=quorumCheckOnRead,
             leaseEnabled=leaseEnabled,
             deferCommitEnabled=deferCommitEnabled,
             inheritLeaseEnabled=inheritLeaseEnabled,
             operations=9999999,  # Let Benchmark.cc's timeout end the trial.
             threads=10,
+            electionTimeoutMilliseconds=ELECTION_TIMEOUT_MS,
+            delta=2 * ELECTION_TIMEOUT_MS,  # Test lease expiration > election timeout.
         )
+    return options
 
 
-_make_options()
+OPTIONS = _make_options()
 
 
-def kill_leader(when: float):
-    for s in SERVERS:
+def is_leader(server: str) -> bool:
+    try:
         out = run_command(
-            f"./build/Client/ServerControl --server={s} stats get", quiet=True
+            f"./build/Client/ServerControl --server={server} --timeout=1s stats get", quiet=True
         )
-        if "state: LEADER" in out:
+        return "state: LEADER" in out
+    except subprocess.CalledProcessError:
+        return False
+
+
+def kill_leader(when: float, servers: list[str]):
+    for s in servers:
+        if is_leader(s):
             # To kill the leader at the precisely right time, open the channel then wait.
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -79,85 +85,108 @@ def kill_leader(when: float):
             client.close()
             print(f"Killed leader {s} at {datetime.now().strftime("%S.%f")}")
             break
+    else:
+        raise RuntimeError("No leader found to kill")
 
 
-def main():
-    if os.path.exists(CSV_PATH):
-        os.remove(CSV_PATH)
+def main(servers: list[str], enabled_configs: list[BenchmarkOptions]):
+    for option_index, options in enumerate(OPTIONS.values()):
+        if options not in enabled_configs:
+            continue
 
-    combined_df: pd.DataFrame | None = None
-    for options in OPTIONS.values():
         print(options)
-        write_config_files(SERVERS, options)
-
-        for server_id, addr in enumerate(SERVERS, start=1):
-            title(f"SETUP {addr}")
-            run_ssh_command(
-                addr,
-                f"""
+        # Since electionTimeoutRandomizationDisabled is true, when we kill serverId 1, serverId 2
+        # and 3 can compete for election. Fix that by disabling serverId 3. Now we have a new
+        # problem: if serverId 3 has a longer log than 2 at the time we kill 1, then 2 can't win the
+        # election. In that case just retry. This is all a hack to make the election precisely
+        # electionTimeoutMilliseconds long for the sake of a pretty chart.
+        write_config_files(servers, options, non_candidate_ids=[3])
+        succeeded = False
+        for retry in range(20):  # Retry loop.
+            for server_id, addr in enumerate(servers, start=1):
+                title(f"SETUP {addr}")
+                run_ssh_command(
+                    addr,
+                    f"""
 cd logcabin
 killall -9 perf LogCabin Reconfigure || true
 rm -rf /tmp/logcabin {server_id}.log
 """,
-            )
-
-            if server_id == 1:
-                run_ssh_command(
-                    addr,
-                    "cd logcabin; ./build/LogCabin --config conf1.conf --bootstrap",
                 )
 
-            run_ssh_command(
-                addr,
-                f"""
+                if server_id == 1:
+                    run_ssh_command(
+                        addr,
+                        "cd logcabin; ./build/LogCabin --config conf1.conf --bootstrap",
+                    )
+
+                run_ssh_command(
+                    addr,
+                    f"""
 cd logcabin
 nohup ./build/LogCabin --config conf{server_id}.conf --log {server_id}.log >{server_id}.out 2>&1 </dev/null &
 ps aux | grep LogCabin""",
+                )
+
+            time.sleep(5)
+
+            title("RECONFIGURE")
+            run_command(
+                f"./build/Examples/Reconfigure --cluster={servers[0]} set {' '.join(servers)}"
             )
 
-        time.sleep(5)
+            title("HELLOWORLD")
+            run_command(f"./build/Examples/HelloWorld --cluster={','.join(servers)}")
 
-        title("RECONFIGURE")
-        run_command(
-            f"./build/Examples/Reconfigure --cluster={SERVERS[0]} set {' '.join(SERVERS)}"
-        )
-
-        title("HELLOWORLD")
-        run_command(f"./build/Examples/HelloWorld --cluster={','.join(SERVERS)}")
-
-        title("EXPERIMENT")
-        t = threading.Thread(
-            target=kill_leader,
-            kwargs={"when": time.time() + KILL_LEADER_TIME_MS / 1000},
-        )
-        t.start()
-        current_time = datetime.now().strftime("%S.%f")
-        print(f"Start UnavailabilityTest at {current_time}")
-        run_command(
-            f"./build/Examples/UnavailabilityTest --cluster={','.join(SERVERS)} "
-            f"--size={options.size} --timeout={3 * LEASE_TIMEOUT_MS}ms "
-            f"--out=unavailability_result.txt"
-        )
-
-        t.join()
-        title("CLEANUP")
-        for addr in SERVERS:
-            run_ssh_command(
-                addr, "sudo killall -q -9 perf LogCabin Reconfigure || true"
+            title("EXPERIMENT")
+            t = threading.Thread(
+                target=kill_leader,
+                kwargs={
+                    "when": time.time() + KILL_LEADER_TIME_MS / 1000,
+                    "servers": servers,
+                },
             )
+            t.start()
+            current_time = datetime.now().strftime("%S.%f")
+            print(f"Start UnavailabilityTest at {current_time}")
+            # TODO: faster reads than writes to separate lines on chart
+            try:
+                run_command(
+                    f"./build/Examples/UnavailabilityTest --cluster={','.join(servers)} "
+                    f"--size={options.size} --timeout={3 * LEASE_TIMEOUT_MS}ms "
+                    f"--out=unavailability_result.txt"
+                )
+            except subprocess.CalledProcessError as e:
+                # Probably serverId 2 didn't become leader. Retry.
+                print(f"UnavailabilityTest failed: {e}")
+                continue
+
+            t.join()
+            if is_leader(servers[1]):
+                print("SUCCESS: serverId 2 became leader")
+            else:
+                print("RETRY: serverId 2 didn't become leader")
+                continue
+            
+            title("CLEANUP")
+            for addr in servers:
+                run_ssh_command(
+                    addr, "sudo killall -q -9 perf LogCabin Reconfigure || true"
+                )
+                
+            succeeded = True
+            break
+
+        if not succeeded:
+            raise RuntimeError(f"Failed to complete experiment after {retry} tries")
 
         df = pd.read_csv("unavailability_result.txt")
         df["quorumCheckOnRead"] = options.quorumCheckOnRead
         df["leaseEnabled"] = options.leaseEnabled
         df["deferCommitEnabled"] = options.deferCommitEnabled
         df["inheritLeaseEnabled"] = options.inheritLeaseEnabled
-        if combined_df is None:
-            combined_df = df
-        else:
-            combined_df = pd.concat([combined_df, df], ignore_index=True)
-
-        # Write it out each trial for debugging.
-        combined_df.to_csv(CSV_PATH, index=False)
+        csv_path = f"{os.path.splitext(__file__)[0]}-{option_index}.csv"
+        df.to_csv(csv_path, index=False)
 
 
 if __name__ == "__main__":
@@ -165,6 +194,21 @@ if __name__ == "__main__":
     parser.add_argument(
         "--servers", type=str, required=True, help="Comma-separated list of addresses"
     )
+    option_names = [name.replace("\n", "") for name in OPTIONS.keys()]
+    parser.add_argument(
+        "--config",
+        action="append",
+        choices=option_names,
+        help="Which benchmark configs to enable",
+    )
     args = parser.parse_args()
     SERVERS = args.servers.split(",")
-    main()
+    if args.config:
+        ENABLED_CONFIGS = [
+            options
+            for name, options in OPTIONS.items()
+            if name.replace("\n", "") in args.config
+        ]
+    else:
+        ENABLED_CONFIGS = list(OPTIONS.values())
+    main(SERVERS, ENABLED_CONFIGS)

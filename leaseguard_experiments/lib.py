@@ -118,11 +118,16 @@ def title(t):
     print(f"\n{t} {('======'*10)[:75 - len(t)]}\n")
 
 
-def write_config_files(servers: list[str], options: BenchmarkOptions):
+def write_config_files(
+    servers: list[str],
+    options: BenchmarkOptions,
+    non_candidate_ids: list[int] | None = None,  # TODO: remove
+):
     def bul(b: bool):
         return "true" if b else "false"
 
     for server_id, addr in enumerate(servers, start=1):
+        electable = not non_candidate_ids or server_id not in non_candidate_ids
         with open(f"conf{server_id}.conf", "w") as f:
             # Write the conf file locally, sshfs will copy it to all servers.
             f.write(
@@ -131,15 +136,17 @@ serverId = {server_id}
 listenAddresses = {addr}
 clusterUUID = foo
 storagePath = /tmp/logcabin
-logPolicy = VERBOSE
+logPolicy = NOTICE
 snapshotMinLogSize = 99999999999
 tcpConnectTimeoutMilliseconds = 10000
 electionTimeoutMilliseconds = {options.electionTimeoutMilliseconds}
+electable = {bul(electable)}
 delta = {options.delta}
 quorumCheckOnRead = {bul(options.quorumCheckOnRead)}
 leaseEnabled = {bul(options.leaseEnabled)}
 deferCommitEnabled = {bul(options.deferCommitEnabled)}
 inheritLeaseEnabled = {bul(options.inheritLeaseEnabled)}
+electionTimeoutRandomizationDisabled = true
 """
             )
 

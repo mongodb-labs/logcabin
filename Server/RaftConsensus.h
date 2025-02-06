@@ -1500,6 +1500,11 @@ class RaftConsensus {
      * candidate and starting a new election.
      */
     const std::chrono::nanoseconds ELECTION_TIMEOUT;
+    
+    /**
+     * Whether this server should run for election.
+     */
+    const bool ELECTABLE;
 
     /**
      * A leader sends RPCs at least this often, even if there is no data to

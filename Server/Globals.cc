@@ -93,6 +93,7 @@ Globals::Globals()
     , leaseEnabled(false)
     , deferCommitEnabled(false)
     , inheritLeaseEnabled(false)
+    , electionTimeoutRandomizationDisabled(false)
     , controlService()
     , raftService()
     , clientService()
@@ -190,6 +191,8 @@ Globals::init()
     leaseEnabled = config.read<bool>("leaseEnabled", false);
     deferCommitEnabled = config.read<bool>("deferCommitEnabled", false);
     inheritLeaseEnabled = config.read<bool>("inheritLeaseEnabled", false);
+    electionTimeoutRandomizationDisabled =
+        config.read<bool>("electionTimeoutRandomizationDisabled", false);
 }
 
 void

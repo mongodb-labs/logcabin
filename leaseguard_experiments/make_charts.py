@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os.path
 
 import matplotlib.font_manager as font_manager
 from matplotlib.lines import Line2D
@@ -11,10 +12,11 @@ from lib import BenchmarkOptions
 
 
 _logger = logging.getLogger("chart")
+_this_dir = os.path.dirname(__file__)
 
 
 def chart_network_latency():
-    csv = pd.read_csv("network_latency_experiment.csv")
+    csv = pd.read_csv(f"{_this_dir}/network_latency_experiment.csv")
     BARWIDTH = 0.15
     LINEWIDTH = 0.01
     fig, ax = plt.subplots(figsize=(5, 3))
@@ -42,7 +44,7 @@ def chart_network_latency():
                 & (csv["inheritLeaseEnabled"])
             )
 
-        column = "p90latencyNanos"
+        column = "p50latencyNanos"
         df = (
             csv[config_predicate]
             .groupby(
@@ -78,11 +80,11 @@ def chart_network_latency():
         handles=[Patch(color="C0")],
         handleheight=0.65,
         handlelength=0.65,
-        labels=["read latency p90"],
+        labels=["read latency average"],
         frameon=False,
     )
     arrow_x = csv["latencyMs"].min()
-    arrow_y = csv[csv["latencyMs"] == 0]["p90latencyNanos"].max() / 1_000_000
+    arrow_y = csv[csv["latencyMs"] == 0][column].max() / 1_000_000
 
     for i in range(len(combos)):
         offset, color, config_name = combos[i]
@@ -103,7 +105,7 @@ def chart_network_latency():
 
     fig.tight_layout()
     fig.subplots_adjust(top=0.9)
-    chart_path = "network_latency_experiment.pdf"
+    chart_path = f"{_this_dir}/network_latency_experiment.pdf"
     fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
     _logger.info(f"Created {chart_path}")
 
@@ -116,16 +118,11 @@ def chart_unavailability():
         LEASE_TIMEOUT_MS,
     )
 
-    csv = pd.read_csv("unavailability_experiment.csv")
-    fig, axes = plt.subplots(len(OPTIONS), 1, sharex=True, sharey=True, figsize=(5, 5))
-
-    def resample_data(options: BenchmarkOptions):
-        df = csv[
-            (csv["quorumCheckOnRead"] == options.quorumCheckOnRead)
-            & (csv["leaseEnabled"] == options.leaseEnabled)
-            & (csv["inheritLeaseEnabled"] == options.inheritLeaseEnabled)
-            & (csv["deferCommitEnabled"] == options.deferCommitEnabled)
-        ].copy()
+    def resample_data(benchmark_index: int, options: BenchmarkOptions):
+        df = pd.read_csv(f"{_this_dir}/unavailability_experiment-{benchmark_index}.csv")
+        for column in ["quorumCheckOnRead", "leaseEnabled", "deferCommitEnabled"]:
+            assert df[column].nunique() == 1 and df[column].iloc[0] == getattr(options, column)
+        
         interval = 10_000_000  # 10ms in nanos.
         df["time_bin"] = (df["recordedAtNanos"] // interval) * interval
         df_resampled = (
@@ -148,8 +145,9 @@ def chart_unavailability():
         ).fillna(0)
         return df_resampled
 
-    dfs = {name: resample_data(options) for name, options in OPTIONS.items()}
+    dfs = {name: resample_data(i, options) for i, (name, options) in enumerate(OPTIONS.items())}
     y_lim = max(df["reads"].max() for df in dfs.values())
+    fig, axes = plt.subplots(len(OPTIONS), 1, sharex=True, sharey=True, figsize=(5, 5))
     axes[-1].set(xlabel=r"time in milliseconds $\rightarrow$")
 
     for i, (name, df) in enumerate(dfs.items()):
@@ -225,7 +223,7 @@ def chart_unavailability():
     fig.text(0.002, 0.5, "operations per millisecond", va="center", rotation="vertical")
     fig.tight_layout()
     fig.subplots_adjust(hspace=0.4, top=0.92)
-    chart_path = "unavailability_experiment.pdf"
+    chart_path = f"{_this_dir}/unavailability_experiment.pdf"
     fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
     _logger.info(f"Created {chart_path}")
 
@@ -237,7 +235,7 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
     plt.rcParams.update({"font.size": 12})
-    font_path = "cmunrm.ttf"  # Computer Modern Roman, like Latex"s default.
+    font_path = f"{_this_dir}/cmunrm.ttf"  # Computer Modern Roman, like Latex's default.
     font_manager.fontManager.addfont(font_path)
     font_properties = font_manager.FontProperties(fname=font_path)
     plt.rcParams["font.family"] = font_properties.get_name()

@@ -344,6 +344,7 @@ int main(int argc, char **argv)
             LogCabin::Client::Debug::logPolicyFromString(options.logPolicy));
         Cluster cluster = Cluster(options.cluster);
         Tree tree = cluster.getTree();
+        tree.setTimeout(10000000000); // 10 seconds in nanoseconds.
 
         std::string value(options.size, 'v');
 
