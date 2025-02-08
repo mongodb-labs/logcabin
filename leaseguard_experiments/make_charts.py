@@ -146,7 +146,7 @@ def chart_unavailability():
         return df_resampled
 
     dfs = {name: resample_data(i, options) for i, (name, options) in enumerate(OPTIONS.items())}
-    y_lim = max(df["reads"].max() for df in dfs.values())
+    y_lim = 1.1 * max(df["reads"].max() for df in dfs.values())
     fig, axes = plt.subplots(len(OPTIONS), 1, sharex=True, sharey=True, figsize=(5, 5))
     axes[-1].set(xlabel=r"time in milliseconds $\rightarrow$")
 

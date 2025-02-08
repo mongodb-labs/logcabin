@@ -68,6 +68,7 @@ class BenchmarkResult:
 
 
 def run_command(command: str, quiet: bool = False) -> str:
+    print(command)
     process = subprocess.Popen(
         command,
         shell=True,

@@ -147,44 +147,49 @@ StateMachine::query(const Query::Request& request,
         paths.push_back(request.tree().read().path());
     }
 
-    // Wait until we get a lease or can do inherited lease read.
-    while (true)
+    if (globals.leaseEnabled)
     {
         const auto localNow = Core::Time::TimeBounds::localNow();
         const auto appliedAge = localNow.latest - lastAppliedTimeBounds.earliest;
-        bool isLimboRead;
-        if (globals.inheritLeaseEnabled) {
-            isLimboRead = std::any_of(
-                paths.cbegin(), paths.cend(), [&](const std::string &p)
-                    { return limboPaths.find(p) != limboPaths.end(); });
+        
+        if (appliedAge > static_cast<uint64_t>(globals.raft->LEASE_TIMEOUT_DELTA.count()))
+        {
+            WARNING("rejecting read, no lease, last applied is too old,"
+                    " delta %f sec now %s lastAppliedTimeBounds %s,"
+                    " diff %f sec, path '%s'",
+                    double(globals.raft->LEASE_TIMEOUT_DELTA.count()) / 1e9,
+                    localNow.toString().c_str(), lastAppliedTimeBounds.toString().c_str(),
+                    double(appliedAge) / 1e9, Core::StringUtil::toString(paths).c_str());
+            return false;
+        }
 
-            if (appliedAge 
-                > static_cast<uint64_t>(globals.raft->LEASE_TIMEOUT_DELTA.count()))
+        if (lastAppliedTerm < globals.raft->getCurrentTerm())
+        {
+            if (!globals.inheritLeaseEnabled)
+            {
+                WARNING("rejecting read, no lease, last applied term is past,"
+                        " delta %f sec now %s lastAppliedTimeBounds %s,"
+                        " diff %f sec, path '%s'",
+                        double(globals.raft->LEASE_TIMEOUT_DELTA.count()) / 1e9,
+                        localNow.toString().c_str(), lastAppliedTimeBounds.toString().c_str(),
+                        double(appliedAge) / 1e9, Core::StringUtil::toString(paths).c_str());
+                return false;
+            }
+
+            bool isLimboRead = std::any_of(paths.cbegin(), paths.cend(), [&](const std::string &p)
+                                           { return limboPaths.find(p) != limboPaths.end(); });
+
+            if (isLimboRead)
             {
                 WARNING("rejecting read, no lease,"
                         " delta %f sec now %s lastAppliedTimeBounds %s,"
-                        " diff %f sec, path '%s' %s limbo region",
+                        " diff %f sec, path '%s' is in limbo region",
                         double(globals.raft->LEASE_TIMEOUT_DELTA.count()) / 1e9,
-                        localNow.toString().c_str(),
-                        lastAppliedTimeBounds.toString().c_str(),
-                        double(appliedAge) / 1e9,
-                        Core::StringUtil::toString(paths).c_str(),
-                        isLimboRead ? "is in" : "isn't in");
+                        localNow.toString().c_str(), lastAppliedTimeBounds.toString().c_str(),
+                        double(appliedAge) / 1e9, Core::StringUtil::toString(paths).c_str());
                 return false;
             }
-        } else {
-            isLimboRead = true; // disable reads without lease
         }
- 
-        // If I committed an entry in my term, I have no limbo region.
-        if (lastAppliedTerm >= globals.raft->getCurrentTerm())
-            break;
-            
-        // If Raft has no entries affecting 'path' with index > lastApplied.
-        if (!isLimboRead)
-            break;
-            
-        entriesApplied.wait(lockGuard);        
     }
 
     Tree::ProtoBuf::readOnlyTreeRPC(tree,

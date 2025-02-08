@@ -145,14 +145,9 @@ treeCall(LeaderRPCBase& leaderRPC,
             VERBOSE("Timeout elapsed on read-only tree query");
             break;
         case LeaderRPC::Status::INVALID_REQUEST:
-            // TODO(ongaro): Once any new Tree request types are introduced,
-            // this PANIC will need to move up the call stack, so that we can
-            // try a new-style request and then ask for forgiveness if it
-            // fails. Same for the read-write tree calls below.
-            PANIC("The server and/or replicated state machine doesn't support "
-                  "the read-only tree query or claims the request is "
-                  "malformed. Request is: %s",
-                  Core::ProtoBuf::dumpString(request).c_str());
+            // HACK (Jesse): This could simply be a server that doesn't have a lease.
+            response.set_status(Protocol::Client::Status::UNKNOWN);
+            break;
     }
 }
 

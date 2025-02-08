@@ -178,6 +178,7 @@ void
 ClientService::stateMachineQuery(RPC::ServerRPC rpc)
 {
     PRELUDE(StateMachineQuery);
+    // If quorumCheckOnRead is enabled, this heartbeats all nodes and waits for a majority.
     std::pair<Result, uint64_t> result = globals.raft->getLastCommitIndex();
     if (result.first == Result::RETRY || result.first == Result::NOT_LEADER) {
         Protocol::Client::Error error;

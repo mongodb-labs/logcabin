@@ -149,7 +149,6 @@ ps aux | grep LogCabin""",
             t.start()
             current_time = datetime.now().strftime("%S.%f")
             print(f"Start UnavailabilityTest at {current_time}")
-            # TODO: faster reads than writes to separate lines on chart
             try:
                 run_command(
                     f"./build/Examples/UnavailabilityTest --cluster={','.join(servers)} "
@@ -158,7 +157,7 @@ ps aux | grep LogCabin""",
                 )
             except subprocess.CalledProcessError as e:
                 # Probably serverId 2 didn't become leader. Retry.
-                print(f"UnavailabilityTest failed: {e}")
+                print(f"RETRY: UnavailabilityTest failed: {e}")
                 continue
 
             t.join()

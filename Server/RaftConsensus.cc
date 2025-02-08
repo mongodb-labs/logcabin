@@ -2528,9 +2528,9 @@ RaftConsensus::appendEntries(std::unique_lock<Mutex>& lockGuard,
             if (peer.matchIndex > prevLogIndex + numEntries) {
                 // Revisit this warning if we pipeline AppendEntries RPCs for
                 // performance.
-                WARNING("matchIndex should monotonically increase within a "
-                        "term, since servers don't forget entries. But it "
-                        "didn't.");
+                // WARNING("matchIndex should monotonically increase within a "
+                //         "term, since servers don't forget entries. But it "
+                //         "didn't.");
             } else {
                 peer.matchIndex = prevLogIndex + numEntries;
                 advanceCommitIndex();
@@ -3180,6 +3180,7 @@ RaftConsensus::startNewElection()
     for (auto it = entryCommitted.begin(); it != entryCommitted.end(); ++it)
         it->notify_all();
     ++currentTerm;
+    lastEntryInPreviousTermIndex = log->getLastLogIndex();
     state = State::CANDIDATE;
     leaderId = 0;
     votedFor = serverId;

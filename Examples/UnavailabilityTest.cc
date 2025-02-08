@@ -57,8 +57,8 @@ using LogCabin::Client::Tree;
 using LogCabin::Client::Util::parseNonNegativeDuration;
 
 const int THREADS = 10;
-const int WRITES_PER_MS = 100;
-const int READS_PER_MS = 100;
+const double WRITES_PER_US = 1 / 1000.;
+const double READS_PER_US = 2 / 1000.;
 
 enum OperationType
 {
@@ -256,7 +256,8 @@ private:
 };
 
 void operationThreadMain(const OptionParser &options, Tree tree, const std::string &value,
-                         OperationType operationType, std::atomic<bool> &exit, ThreadResult &result)
+                         OperationType operationType, double ops_per_us, std::atomic<bool> &exit,
+                         ThreadResult &result)
 {
     ZipfGenerator zipf(100, 1.0);
 
@@ -264,14 +265,14 @@ void operationThreadMain(const OptionParser &options, Tree tree, const std::stri
     {
         int key = zipf.generate();
         uint64_t start = duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
+        bool success = true;
         if (operationType == OperationType::READ)
         {
             std::string contents;
             auto result = tree.read(std::to_string(key), contents);
             if (result.status != Status::OK && result.status != Status::LOOKUP_ERROR)
             {
-                std::cerr << "Read key '" << key << "': " << result.error;
-                ::exit(1);
+                success = false; // Probably no lease, status INVALID_ARGUMENT.
             }
         }
         else
@@ -280,22 +281,20 @@ void operationThreadMain(const OptionParser &options, Tree tree, const std::stri
         }
 
         uint64_t end = duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
-        auto latency = end - start;
-        if (operationType == OperationType::READ)
+        auto latencyNanos = end - start;
+        if (success)
         {
-            result.read_latencies.push_back({start, latency});
+            if (operationType == OperationType::READ)
+            {
+                result.read_latencies.push_back({start, latencyNanos});
+            }
+            else
+            {
+                result.write_latencies.push_back({start, latencyNanos});
+            }
         }
-        else
-        {
-            result.write_latencies.push_back({start, latency});
-        }
-        int64_t sleep_us =
-            1000 / (operationType == OperationType::READ ? READS_PER_MS : WRITES_PER_MS) -
-            latency / 1000;
-        if (sleep_us > 0)
-        {
-            usleep(sleep_us);
-        }
+        int64_t sleep_us = std::max(0., 1. / ops_per_us - latencyNanos / 1000.);
+        usleep(sleep_us);
     }
 }
 
@@ -356,10 +355,12 @@ int main(int argc, char **argv)
         size_t j = 0;
         for (const auto &operationType : operationTypes)
         {
+            double ops_per_us = operationType == OperationType::READ ? READS_PER_US : WRITES_PER_US;
+            ops_per_us /= THREADS;
             for (uint64_t i = 0; i < THREADS; ++i)
             {
                 threads.emplace_back(operationThreadMain, std::ref(options), tree, std::ref(value),
-                                     operationType, std::ref(exit),
+                                     operationType, ops_per_us, std::ref(exit),
                                      std::ref(resultPerThread.at(j++)));
             }
         }
