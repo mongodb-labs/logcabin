@@ -56,7 +56,6 @@ using LogCabin::Client::Status;
 using LogCabin::Client::Tree;
 using LogCabin::Client::Util::parseNonNegativeDuration;
 
-const int THREADS = 10;
 const double WRITES_PER_US = 1 / 1000.;
 const double READS_PER_US = 2 / 1000.;
 
@@ -65,6 +64,19 @@ enum OperationType
     READ,
     WRITE,
 };
+
+std::ostream &operator<<(std::ostream &os, const OperationType &operationType)
+{
+    switch (operationType)
+    {
+    case READ:
+        return os << "read";
+    case WRITE:
+        return os << "write";
+    default:
+        return os << "UNKNOWN";
+    }
+}
 
 /**
  * Parses argv for the main function.
@@ -78,7 +90,7 @@ public:
         , cluster("logcabin:5254")
         , logPolicy("")
         , size(1024)
-        , timeout(parseNonNegativeDuration("30s"))
+        , timeoutNanos(parseNonNegativeDuration("30s"))
         , resultsFileName("")
     {
         while (true)
@@ -103,7 +115,7 @@ public:
                 cluster = optarg;
                 break;
             case 'd':
-                timeout = parseNonNegativeDuration(optarg);
+                timeoutNanos = parseNonNegativeDuration(optarg);
                 break;
             case 'h':
                 usage();
@@ -181,21 +193,8 @@ public:
     std::string cluster;
     std::string logPolicy;
     uint64_t size;
-    uint64_t timeout;
+    uint64_t timeoutNanos;
     std::string resultsFileName;
-};
-
-struct ThreadResult
-{
-    ThreadResult()
-        : read_latencies()
-        , write_latencies()
-    {
-    }
-
-    // Pair of start time and latency, both in nanoseconds.
-    typedef std::vector<std::pair<uint64_t, uint64_t>> latencies_t;
-    latencies_t read_latencies, write_latencies;
 };
 
 class ZipfGenerator
@@ -255,48 +254,10 @@ private:
     }
 };
 
-void operationThreadMain(const OptionParser &options, Tree tree, const std::string &value,
-                         OperationType operationType, double ops_per_us, std::atomic<bool> &exit,
-                         ThreadResult &result)
-{
-    ZipfGenerator zipf(100, 1.0);
-
-    while (!exit)
-    {
-        int key = zipf.generate();
-        uint64_t start = duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
-        bool success = true;
-        if (operationType == OperationType::READ)
-        {
-            std::string contents;
-            auto result = tree.read(std::to_string(key), contents);
-            if (result.status != Status::OK && result.status != Status::LOOKUP_ERROR)
-            {
-                success = false; // Probably no lease, status INVALID_ARGUMENT.
-            }
-        }
-        else
-        {
-            tree.writeEx(std::to_string(key), value);
-        }
-
-        uint64_t end = duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
-        auto latencyNanos = end - start;
-        if (success)
-        {
-            if (operationType == OperationType::READ)
-            {
-                result.read_latencies.push_back({end, latencyNanos});
-            }
-            else
-            {
-                result.write_latencies.push_back({end, latencyNanos});
-            }
-        }
-        int64_t sleep_us = std::max(0., 1. / ops_per_us - latencyNanos / 1000.);
-        usleep(sleep_us);
-    }
-}
+/**
+ * Pair of start time and latency, both in nanoseconds.
+ */
+typedef std::pair<uint64_t, uint64_t> OperationResult;
 
 /**
  * Return the time since the Unix epoch in nanoseconds.
@@ -304,34 +265,79 @@ void operationThreadMain(const OptionParser &options, Tree tree, const std::stri
 uint64_t timeNanos()
 {
     struct timespec now;
+#ifdef NDEBUG
+    clock_gettime(CLOCK_REALTIME, &now);
+#else
     int r = clock_gettime(CLOCK_REALTIME, &now);
     assert(r == 0);
+#endif
     return uint64_t(now.tv_sec) * 1000 * 1000 * 1000 + uint64_t(now.tv_nsec);
 }
 
 /**
- * Main function for the timer thread, whose job is to wait until a particular
- * timeout elapses and then set 'exit' to true.
- * \param timeout
- *      Seconds to wait before setting exit to true.
- * \param[in,out] exit
- *      If this is set to true from another thread, the timer thread will exit
- *      soonish. Also, if the timeout elapses, the timer thread will set this
- *      to true and exit.
+ * Do one operation.
  */
-void timerThreadMain(uint64_t timeout, std::atomic<bool> &exit)
+void operationThreadMain(const OptionParser &options, Tree tree, const std::string &value,
+                         OperationType operationType, double ops_per_us, OperationResult &result)
 {
-    uint64_t start = timeNanos();
-    while (!exit)
+    // TODO: cache the zipf generator.
+    ZipfGenerator zipf(100, 1.0);
+    int key = zipf.generate();
+    uint64_t start =
+        duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
+    bool success = true;
+    if (operationType == OperationType::READ)
     {
-        usleep(50 * 1000);
-        if ((timeNanos() - start) > timeout)
+        std::string contents;
+        auto result = tree.read(std::to_string(key), contents);
+        if (result.status != Status::OK && result.status != Status::LOOKUP_ERROR)
         {
-            exit = true;
+            success = false; // Probably no lease, status INVALID_ARGUMENT.
         }
+    }
+    else
+    {
+        tree.writeEx(std::to_string(key), value);
+    }
+
+    uint64_t end =
+        duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
+    auto latencyNanos = end - start;
+    if (success)
+    {
+        result.first = start;
+        result.second = latencyNanos;
     }
 }
 
+/**
+ * Start a bunch of threads to do reads, or to do writes.
+ */
+void schedulerThreadMain(const OptionParser &options, Tree tree, const std::string &value,
+                         OperationType operationType, double opsPerMicrosecond,
+                         uint64_t timeoutNanos, std::vector<OperationResult> &results)
+{
+    auto startNanos = timeNanos();
+    auto nowNanos = startNanos;
+    std::vector<std::thread> threads;
+    size_t i = 0;
+    while (nowNanos - startNanos < timeoutNanos)
+    {
+        assert(results.capacity() > i);
+        std::thread t(operationThreadMain, options, tree, value, operationType, opsPerMicrosecond,
+                      std::ref(results[i]));
+        threads.push_back(std::move(t));
+        ++i;
+        nowNanos = timeNanos();
+        auto nextTimeNanos = startNanos + uint64_t(double(i) * 1000 / opsPerMicrosecond);
+        usleep(std::max(0, int(nextTimeNanos - nowNanos)));
+    }
+
+    for (auto &t : threads)
+    {
+        t.join();
+    }
+}
 } // anonymous namespace
 
 int main(int argc, char **argv)
@@ -344,27 +350,24 @@ int main(int argc, char **argv)
         Cluster cluster = Cluster(options.cluster);
         Tree tree = cluster.getTree();
         tree.setTimeout(10000000000); // 10 seconds in nanoseconds.
-
         std::string value(options.size, 'v');
-
-        std::atomic<bool> exit(false);
-        std::thread timer(timerThreadMain, options.timeout, std::ref(exit));
         std::vector<OperationType> operationTypes = {OperationType::READ, OperationType::WRITE};
-        std::vector<ThreadResult> resultPerThread{THREADS * operationTypes.size()};
+        std::map<OperationType, std::vector<OperationResult>> resultPerThread;
         std::vector<std::thread> threads;
-        size_t j = 0;
-        for (const auto &operationType : operationTypes)
+
+        for (auto &operationType : operationTypes)
         {
-            double ops_per_us = operationType == OperationType::READ ? READS_PER_US : WRITES_PER_US;
-            ops_per_us /= THREADS;
-            for (uint64_t i = 0; i < THREADS; ++i)
-            {
-                threads.emplace_back(operationThreadMain, std::ref(options), tree, std::ref(value),
-                                     operationType, ops_per_us, std::ref(exit),
-                                     std::ref(resultPerThread.at(j++)));
-            }
+            double opsPerMicrosecond =
+                operationType == OperationType::READ ? READS_PER_US : WRITES_PER_US;
+            size_t totalOps = size_t(double(options.timeoutNanos) * opsPerMicrosecond / 1000);
+            // Reserve extra space in case.
+            resultPerThread[operationType].resize(2 * totalOps);
+            std::thread t = std::thread(
+                schedulerThreadMain, std::ref(options), tree, std::ref(value), operationType,
+                opsPerMicrosecond, options.timeoutNanos, std::ref(resultPerThread[operationType]));
+            threads.push_back(std::move(t));
         }
-        timer.join(); // Await timeout.
+
         for (auto &t : threads)
         {
             t.join();
@@ -375,21 +378,16 @@ int main(int argc, char **argv)
             std::ofstream f(options.resultsFileName);
             f << "operationType,recordedAtNanos,latencyNanos" << std::endl;
 
-            ThreadResult::latencies_t read_latencies, write_latencies;
-            for (const auto &threadResult : resultPerThread)
+            for (const auto &operationType : operationTypes)
             {
-                read_latencies.insert(read_latencies.end(), threadResult.read_latencies.begin(),
-                                      threadResult.read_latencies.end());
-                write_latencies.insert(write_latencies.end(), threadResult.write_latencies.begin(),
-                                       threadResult.write_latencies.end());
-            }
-            for (const auto &row : read_latencies)
-            {
-                f << "read," << row.first << "," << row.second << std::endl;
-            }
-            for (const auto &row : write_latencies)
-            {
-                f << "write," << row.first << "," << row.second << std::endl;
+                auto result = resultPerThread[operationType];
+                for (const auto &row : result)
+                {
+                    if (row.first != 0)
+                    {
+                        f << operationType << "," << row.first << "," << row.second << std::endl;
+                    }
+                }
             }
         }
 
