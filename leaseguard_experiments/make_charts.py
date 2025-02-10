@@ -22,6 +22,8 @@ def chart_network_latency():
     fig, ax = plt.subplots(figsize=(5, 3))
     ax.set(xlabel="one-way network latency (µs)")
     ax.tick_params(axis="x", bottom=False)
+    ax.set_yscale("log")  # Set y-axis to logarithmic scale
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{int(y)}'))  # Use whole numbers
 
     # x-offset, color, config_name
     combos = [
@@ -44,7 +46,7 @@ def chart_network_latency():
                 & (csv["inheritLeaseEnabled"])
             )
 
-        column = "p50latencyNanos"
+        column = "p95latencyNanos"
         df = (
             csv[config_predicate]
             .groupby(
@@ -80,7 +82,7 @@ def chart_network_latency():
         handles=[Patch(color="C0")],
         handleheight=0.65,
         handlelength=0.65,
-        labels=["read latency average"],
+        labels=["read latency p95"],
         frameon=False,
     )
     arrow_x = csv["latencyMs"].min()
@@ -97,7 +99,7 @@ def chart_network_latency():
             rotation="vertical",
         )
 
-    fig.text(0.002, 0.55, "milliseconds", va="center", rotation="vertical")
+    fig.text(0.002, 0.55, "milliseconds (log scale)", va="center", rotation="vertical")
 
     # Remove chart borders
     for spine in ax.spines.values():
