@@ -53,6 +53,8 @@ message Error {
          * to who the leader is (see leader_hint field).
          */
         NOT_LEADER = 1;
+        
+        SESSION_EXPIRED = 2;
     };
     optional Code error_code = 1;
     /**

@@ -1135,7 +1135,7 @@ class RaftConsensus {
      */
     std::pair<ClientResult, uint64_t> replicate(const Core::Buffer& operation);
 
-    void replicate2(const std::string& operation, ClientRequest request);
+    void replicate2(const Core::Buffer& operation, ClientRequest request);
 
     /**
      * Change the cluster's configuration.

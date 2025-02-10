@@ -1688,12 +1688,12 @@ RaftConsensus::replicate(const Core::Buffer& operation)
 }
 
 void
-RaftConsensus::replicate2(const std::string& operation, ClientRequest request)
+RaftConsensus::replicate2(const Core::Buffer& operation, ClientRequest request)
 {
     std::unique_lock<Mutex> lockGuard(mutex);
     Log::Entry entry;
     entry.set_type(Protocol::Raft::EntryType::DATA);
-    entry.set_data(operation);
+    entry.set_data(operation.getData(), operation.getLength());
     replicateEntry2(entry, lockGuard, std::move(request));
 }
 
@@ -3003,6 +3003,8 @@ RaftConsensus::replicateEntry2(Log::Entry& entry,
 {
     if (state == State::LEADER && !exiting) {
         entry.set_term(currentTerm);
+        entry.set_cluster_time(clusterClock.leaderStamp());
+        setLocalTime(entry);
         append({&entry});
         uint64_t index = log->getLastLogIndex();
         std::shared_ptr<ClientRequest> reqP(new ClientRequest(std::move(request)));

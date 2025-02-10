@@ -187,6 +187,12 @@ class StateMachine {
      */
     void expireResponses(Session& session, uint64_t firstOutstandingRPC);
 
+    bool
+    getResponse(const Protocol::Client::ExactlyOnceRPCInfo& rpcInfo,
+                Command::Response& response,
+                std::unique_lock<Core::Mutex>& lockGuard) const;
+    
+
     /**
      * Remove old sessions.
      * \param clusterTime

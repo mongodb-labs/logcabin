@@ -227,6 +227,37 @@ StateMachine::updateServerStats(Protocol::ServerStats& serverStats) const
     tree.updateServerStats(*smStats.mutable_tree());
 }
 
+bool StateMachine::getResponse(const Protocol::Client::ExactlyOnceRPCInfo &rpcInfo,
+                               Command::Response &response,
+                               std::unique_lock<Core::Mutex> &lockGuard) const
+{
+    auto sessionIt = sessions.find(rpcInfo.client_id());
+    if (sessionIt == sessions.end())
+    {
+        WARNING("Client %lu session expired but client still active", rpcInfo.client_id());
+        return false;
+    }
+    const Session &session = sessionIt->second;
+    auto responseIt = session.responses.find(rpcInfo.rpc_number());
+    if (responseIt == session.responses.end())
+    {
+        // The response for this RPC has already been removed: the client is
+        // not waiting for it. This request is just a duplicate that is safe to
+        // drop.
+        WARNING("Client %lu asking for discarded response to RPC %lu "
+                "(firstOutstandingRPC is %lu)",
+                rpcInfo.client_id(), rpcInfo.rpc_number(), session.firstOutstandingRPC);
+        for (responseIt = session.responses.begin(); responseIt != session.responses.end();
+             ++responseIt)
+        {
+            VERBOSE("Have RPC %lu response", responseIt->first);
+        }
+        return false;
+    }
+    response = responseIt->second;
+    return true;
+}
+
 void
 StateMachine::wait(uint64_t index) const
 {
@@ -401,8 +432,7 @@ void StateMachine::setLimboRegion(
 
 ////////// StateMachine private methods //////////
 
-void
-StateMachine::apply(const RaftConsensus::Entry& entry)
+void StateMachine::apply(const RaftConsensus::Entry &entry)
 {
     Command::Request command;
     if (!Core::ProtoBuf::parse(entry.command, command)) {
@@ -493,7 +523,7 @@ StateMachine::applyThreadMain()
     try {
         while (true) {
             RaftConsensus::Entry entry = consensus->getNextEntry(lastApplied);
-            std::lock_guard<Core::Mutex> lockGuard(mutex);
+            std::unique_lock<Core::Mutex> lockGuard(mutex);
             switch (entry.type) {
                 case RaftConsensus::Entry::SKIP:
                     break;
@@ -515,6 +545,57 @@ StateMachine::applyThreadMain()
             if (shouldTakeSnapshot(lastApplied) &&
                 maySnapshotAt <= Clock::now()) {
                 snapshotSuggested.notify_all();
+            }
+            if (entry.request.rpc.needsReply())
+            {
+                uint16_t versionThen = getVersion(entry.index);
+                Command::Request command;
+                Protocol::Client::StateMachineCommand::Response response;
+
+                // HACK: apply() also parsed the command, above.
+                if (!Core::ProtoBuf::parse(entry.command, command))
+                {
+                    PANIC("Failed to parse protobuf for entry %lu", entry.index);
+                }
+
+                if (command.has_tree())
+                {
+                    PC::ExactlyOnceRPCInfo rpcInfo = command.tree().exactly_once();
+                    bool ok = getResponse(rpcInfo, response, lockGuard);
+                    lockGuard.unlock();
+                    if (ok)
+                    {
+                        entry.request.rpc.reply(response);
+                    }
+                    else
+                    {
+                        Protocol::Client::Error error;
+                        error.set_error_code(Protocol::Client::Error::SESSION_EXPIRED);
+                        entry.request.rpc.returnError(error);
+                    } 
+                }
+                else if (command.has_advance_version())
+                {
+                    response.mutable_advance_version()->set_running_version(versionThen);
+                    entry.request.rpc.reply(response);
+                }
+                else if (command.has_open_session())
+                {
+                    response.mutable_open_session()->set_client_id(entry.index);
+                    assert(response.IsInitialized());
+                    assert(response.has_open_session());
+                    entry.request.rpc.reply(response);
+                }
+                else if (command.has_close_session())
+                {
+                    response.mutable_close_session(); // no fields to set
+                    entry.request.rpc.reply(response);
+                }
+                else
+                {
+                    PANIC("?");
+                }
+
             }
         }
     } catch (const Core::Util::ThreadInterruptedException&) {

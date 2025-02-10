@@ -155,23 +155,8 @@ ClientService::stateMachineCommand(RPC::ServerRPC rpc)
     PRELUDE(StateMachineCommand);
     Core::Buffer cmdBuffer;
     rpc.getRequest(cmdBuffer);
-    std::pair<Result, uint64_t> result = globals.raft->replicate(cmdBuffer);
-    if (result.first == Result::RETRY || result.first == Result::NOT_LEADER) {
-        Protocol::Client::Error error;
-        error.set_error_code(Protocol::Client::Error::NOT_LEADER);
-        std::string leaderHint = globals.raft->getLeaderHint();
-        if (!leaderHint.empty())
-            error.set_leader_hint(leaderHint);
-        rpc.returnError(error);
-        return;
-    }
-    assert(result.first == Result::SUCCESS);
-    uint64_t logIndex = result.second;
-    if (!globals.stateMachine->waitForResponse(logIndex, request, response)) {
-        rpc.rejectInvalidRequest();
-        return;
-    }
-    rpc.reply(response);
+    RaftConsensusInternal::ClientRequest clientRequest(std::move(rpc));
+    globals.raft->replicate2(cmdBuffer, std::move(clientRequest));
 }
 
 void
