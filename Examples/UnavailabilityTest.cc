@@ -286,11 +286,11 @@ void operationThreadMain(const OptionParser &options, Tree tree, const std::stri
         {
             if (operationType == OperationType::READ)
             {
-                result.read_latencies.push_back({start, latencyNanos});
+                result.read_latencies.push_back({end, latencyNanos});
             }
             else
             {
-                result.write_latencies.push_back({start, latencyNanos});
+                result.write_latencies.push_back({end, latencyNanos});
             }
         }
         int64_t sleep_us = std::max(0., 1. / ops_per_us - latencyNanos / 1000.);

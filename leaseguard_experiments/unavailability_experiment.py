@@ -110,6 +110,7 @@ def main(servers: list[str], enabled_configs: list[BenchmarkOptions]):
                     f"""
 cd logcabin
 killall -9 perf LogCabin Reconfigure || true
+sleep 1
 rm -rf /tmp/logcabin {server_id}.log
 """,
                 )
@@ -117,13 +118,18 @@ rm -rf /tmp/logcabin {server_id}.log
                 if server_id == 1:
                     run_ssh_command(
                         addr,
-                        "cd logcabin; ./build/LogCabin --config conf1.conf --bootstrap",
+                        """
+cd logcabin
+ulimit -c unlimited
+./build/LogCabin --config conf1.conf --bootstrap
+""",
                     )
 
                 run_ssh_command(
                     addr,
                     f"""
 cd logcabin
+ulimit -c unlimited
 nohup ./build/LogCabin --config conf{server_id}.conf --log {server_id}.log >{server_id}.out 2>&1 </dev/null &
 ps aux | grep LogCabin""",
                 )
