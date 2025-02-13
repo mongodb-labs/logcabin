@@ -20,7 +20,7 @@ def chart_network_latency():
     BARWIDTH = 0.15
     LINEWIDTH = 0.01
     fig, ax = plt.subplots(figsize=(5, 3))
-    ax.set(xlabel="one-way network latency (µs)")
+    ax.set(xlabel="added one-way network latency (ms)")
     ax.tick_params(axis="x", bottom=False)
     ax.set_yscale("log")  # Set y-axis to logarithmic scale
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{int(y)}'))  # Use whole numbers
