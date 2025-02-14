@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os.path
+import fractions
 
 import matplotlib.font_manager as font_manager
 from matplotlib.lines import Line2D
@@ -17,13 +18,24 @@ _this_dir = os.path.dirname(__file__)
 
 def chart_network_latency():
     csv = pd.read_csv(f"{_this_dir}/network_latency_experiment.csv")
-    BARWIDTH = 0.15
-    LINEWIDTH = 0.01
+    LAT_RANGE = csv["latencyMs"].max() - csv["latencyMs"].min()
+    LAT_CARDINALITY = csv["latencyMs"].unique().size
+    LAT_INTERVAL = LAT_RANGE / (LAT_CARDINALITY - 1)
+    # Room for 3 bars for each configuration plus some padding.
+    BARWIDTH = LAT_INTERVAL / 5
     fig, ax = plt.subplots(figsize=(5, 3))
     ax.set(xlabel="added one-way network latency (ms)")
     ax.tick_params(axis="x", bottom=False)
     ax.set_yscale("log")  # Set y-axis to logarithmic scale
-    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{int(y)}'))  # Use whole numbers
+
+    def format_func(y, _):
+        if y < 1:
+            return str(fractions.Fraction(y).limit_denominator())
+        return f"{int(y)}"
+
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(format_func))
+    ax.yaxis.set_major_locator(plt.LogLocator(base=4))
+    ax.yaxis.set_minor_locator(plt.NullLocator())  # Remove minor ticks
 
     # x-offset, color, config_name
     combos = [
@@ -67,13 +79,11 @@ def chart_network_latency():
 
         # The x-axis "latencyMs" is the artificially added network latency.
         ax.bar(
-            df["latencyMs"] + offset * (BARWIDTH + LINEWIDTH * 2),
+            df["latencyMs"] + offset * BARWIDTH,
             df[column] / 1_000_000,  # convert nanos to millis
             BARWIDTH,
             label=column,
             color=color,
-            edgecolor=color,
-            linewidth=LINEWIDTH,
         )
 
     fig.legend(
@@ -91,10 +101,10 @@ def chart_network_latency():
     for i in range(len(combos)):
         offset, color, config_name = combos[i]
         ax.text(
-            arrow_x + (offset - 0.5) * (BARWIDTH + 2 * LINEWIDTH),
+            arrow_x + 1.15 * offset * BARWIDTH,
             arrow_y + 0.2,
             rf"$\leftarrow$ {config_name}",
-            horizontalalignment="left",
+            horizontalalignment="center",
             verticalalignment="bottom",
             rotation="vertical",
         )
@@ -123,8 +133,10 @@ def chart_unavailability():
     def resample_data(benchmark_index: int, options: BenchmarkOptions):
         df = pd.read_csv(f"{_this_dir}/unavailability_experiment-{benchmark_index}.csv")
         for column in ["quorumCheckOnRead", "leaseEnabled", "deferCommitEnabled"]:
-            assert df[column].nunique() == 1 and df[column].iloc[0] == getattr(options, column)
-        
+            assert df[column].nunique() == 1 and df[column].iloc[0] == getattr(
+                options, column
+            )
+
         interval = 10_000_000  # 10ms in nanos.
         df["time_bin"] = (df["recordedAtNanos"] // interval) * interval
         df_resampled = (
@@ -147,7 +159,10 @@ def chart_unavailability():
         ).fillna(0)
         return df_resampled
 
-    dfs = {name: resample_data(i, options) for i, (name, options) in enumerate(OPTIONS.items())}
+    dfs = {
+        name: resample_data(i, options)
+        for i, (name, options) in enumerate(OPTIONS.items())
+    }
     y_lim = 1.1 * max(df["reads"].max() for df in dfs.values())
     fig, axes = plt.subplots(len(OPTIONS), 1, sharex=True, sharey=True, figsize=(5, 5))
     axes[-1].set(xlabel=r"time in milliseconds $\rightarrow$")
@@ -237,7 +252,9 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
     plt.rcParams.update({"font.size": 12})
-    font_path = f"{_this_dir}/cmunrm.ttf"  # Computer Modern Roman, like Latex's default.
+    font_path = (
+        f"{_this_dir}/cmunrm.ttf"  # Computer Modern Roman, like Latex's default.
+    )
     font_manager.fontManager.addfont(font_path)
     font_properties = font_manager.FontProperties(fname=font_path)
     plt.rcParams["font.family"] = font_properties.get_name()

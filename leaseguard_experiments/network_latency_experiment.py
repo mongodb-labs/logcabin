@@ -171,7 +171,7 @@ if __name__ == "__main__":
         (True, False, False, False),
         (False, True, True, True),
     ]:
-        for latencyMs in (0, 1, 2, 3, 4, 5, 6):
+        for latencyMs in range(11):
             options = BenchmarkOptions(
                 latencyMs=latencyMs,
                 quorumCheckOnRead=quorumCheckOnRead,
