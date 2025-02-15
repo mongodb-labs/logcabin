@@ -137,7 +137,7 @@ def chart_unavailability():
                 options, column
             )
 
-        interval = 10_000_000  # 10ms in nanos.
+        interval = 1_000_000  # 1ms in nanos.
         df["time_bin"] = (df["recordedAtNanos"] // interval) * interval
         df_resampled = (
             df.groupby(["time_bin", "operationType"])
@@ -157,6 +157,17 @@ def chart_unavailability():
         df_resampled = all_time_bins.merge(
             df_resampled, on="time_bin", how="left"
         ).fillna(0)
+        # Apply rolling average.
+        df_resampled[["reads", "writes"]] = (
+            df_resampled[["reads", "writes"]].rolling(window=20, min_periods=1).mean()
+        )
+        # Cut off the first and last data.
+        start_time = df_resampled["time_bin"].min() + 20 * interval
+        end_time = df_resampled["time_bin"].max() - 480 * interval
+        df_resampled = df_resampled[
+            (df_resampled["time_bin"] >= start_time)
+            & (df_resampled["time_bin"] <= end_time)
+        ]
         return df_resampled
 
     dfs = {
@@ -181,6 +192,7 @@ def chart_unavailability():
                     (df["time_bin"] - x_min) / 1_000_000,
                     df[column],
                     label=column,
+                    linewidth=0.75,
                 )
                 ax.set_ylim(0, y_lim)
 
@@ -228,7 +240,7 @@ def chart_unavailability():
         int(y_lim * 0.75),
         r"$\leftarrow$ old lease expires",
         color="purple",
-        bbox=dict(facecolor="white", edgecolor="none"),
+        # bbox=dict(facecolor="white", edgecolor="none"),
     )
     fig.legend(
         loc="upper center",
