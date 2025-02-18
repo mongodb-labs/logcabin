@@ -160,8 +160,7 @@ ps aux | grep LogCabin""",
                 },
             )
             t.start()
-            current_time = datetime.now().strftime("%S.%f")
-            print(f"Start UnavailabilityTest at {current_time}")
+            print(f"{time_str()} Start UnavailabilityTest at")
             try:
                 run_command(
                     f"./build/Examples/UnavailabilityTest --cluster={','.join(servers)} "
@@ -178,7 +177,6 @@ ps aux | grep LogCabin""",
                 print(f"{time_str()} SUCCESS: serverId 2 became leader")
             else:
                 print(f"{time_str()} RETRY: serverId 2 didn't become leader")
-                import sys; sys.exit(1)  # TODO: remove
                 continue
 
             title("CLEANUP")

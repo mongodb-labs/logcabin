@@ -46,8 +46,8 @@ using LogCabin::Client::Status;
 using LogCabin::Client::Tree;
 using LogCabin::Client::Util::parseNonNegativeDuration;
 
-const double WRITES_PER_US = 10 / 1000.;
-const double READS_PER_US = 20 / 1000.;
+const double WRITES_PER_US = 1 / 1000.; // TODO: more
+const double READS_PER_US = 2 / 1000.;
 
 enum OperationType
 {
@@ -324,6 +324,9 @@ int main(int argc, char **argv)
                                             std::lock_guard<std::mutex> lock(resultsMutex);
                                             results[OperationType::WRITE].push_back(OperationResult(
                                                 startNanos, stopNanos, stopNanos - startNanos));
+                                        }
+                                        else {
+                                            VERBOSE("Write failed: %s", result.error.c_str());
                                         }
                                     });
                     nextWriteTimeNanos += uint64_t(1000 / WRITES_PER_US);

@@ -91,7 +91,8 @@ LeaderRPC::Call::start(OpCode opCode,
                          Protocol::Common::ServiceId::CLIENT_SERVICE,
                          1,
                          opCode,
-                         request);
+                         request,
+                         timeout);
 }
 
 void
@@ -172,6 +173,7 @@ LeaderRPC::LeaderRPC(const RPC::Address& hosts,
     , leaderSession() // set by connect()
     , failuresSinceLastSuccess(0)
     , callQueue()
+    , backgroundThread()
     , stopBackgroundThread(false)
 {
     backgroundThread = std::thread(&LeaderRPC::backgroundThreadMain, this);
@@ -180,7 +182,7 @@ LeaderRPC::LeaderRPC(const RPC::Address& hosts,
 LeaderRPC::~LeaderRPC()
 {
     stopBackgroundThread = true;
-    // callQueue.push({nullptr, nullptr}); // Unblock the background thread if it's waiting
+    callQueue.push({nullptr, nullptr}); // Unblock the background thread if it's waiting
     backgroundThread.join();
     leaderSession.reset();
 }
@@ -229,8 +231,13 @@ void LeaderRPC::backgroundThreadMain()
             status = Status::OK;
             break;
         case LeaderRPC::Call::Status::TIMEOUT:
-            status = Status::TIMEOUT;
-            break;
+            if (Clock::now() > rpc.getTimeout()) {
+                status = Status::TIMEOUT;                
+                break;
+            } else {
+                callQueue.push({call, callback});
+                continue;
+            }
         case LeaderRPC::Call::Status::INVALID_REQUEST:
             status = Status::INVALID_REQUEST;
             break;

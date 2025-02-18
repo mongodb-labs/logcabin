@@ -280,7 +280,8 @@ Peer::callRPC(Protocol::Raft::OpCode opCode,
                          Protocol::Common::ServiceId::RAFT_SERVICE,
                          /* serviceSpecificErrorVersion = */ 0,
                          opCode,
-                         request);
+                         request,
+                         TimePoint::max());
 
     // release lock for concurrency
     Core::MutexUnlock<Mutex> unlockGuard(lockGuard);

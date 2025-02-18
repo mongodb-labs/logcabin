@@ -580,7 +580,8 @@ ClientImpl::getServerInfo(const std::string& host,
                            Protocol::Common::ServiceId::CLIENT_SERVICE,
                            1,
                            OpCode::GET_SERVER_INFO,
-                           request);
+                           request,
+                           timeout);
 
         typedef RPC::ClientRPC::Status RPCStatus;
         Protocol::Client::GetServerInfo::Response response;
@@ -852,7 +853,8 @@ ClientImpl::serverControl(const std::string& host,
                            Protocol::Common::ServiceId::CONTROL_SERVICE,
                            1,
                            opCode,
-                           request);
+                           request,
+                           timeout);
 
         typedef RPC::ClientRPC::Status RPCStatus;
         Protocol::Client::Error error;
@@ -900,7 +902,7 @@ void convertLeaderRPCBaseStatusToResult(LeaderRPCBase::Status status, Result &re
         break;
     case LeaderRPCBase::Status::TIMEOUT:
         result.status = Status::TIMEOUT;
-        result.error = "Client-specified timeout elapsed";
+        result.error = "Client-specified timeout elapsed for async request";
         break;
     case LeaderRPCBase::Status::INVALID_REQUEST:
         result.status = Status::INVALID_ARGUMENT;
@@ -947,13 +949,21 @@ void ClientImpl::asyncWrite(const std::string &path, const std::string &workingD
         return;
     }
     Protocol::Client::ReadWriteTree::Request request;
-    *request.mutable_exactly_once() = exactlyOnceRPCHelper.getRPCInfo(timeout);
+    auto exactlyOnce = exactlyOnceRPCHelper.getRPCInfo(timeout);
+    if (!exactlyOnce.has_first_outstanding_rpc() || !exactlyOnce.has_rpc_number())
+    {
+        Result result;
+        result.status = Status::TIMEOUT;
+        result.error = "Couldn't establish session for read-write tree command";
+        callback(result, 0, 0);
+        return;
+    }
+    *request.mutable_exactly_once() = exactlyOnce;
     setCondition(request, condition);
     request.mutable_write()->set_path(realPath);
     request.mutable_write()->set_contents(contents);
     Protocol::Client::StateMachineCommand::Request crequest;
     *crequest.mutable_tree() = request;
-    auto exactlyOnce = request.exactly_once();
     leaderRPC->asyncCall(Protocol::Client::OpCode::STATE_MACHINE_COMMAND, crequest, timeout,
                          [callback, this, exactlyOnce](LeaderRPCBase::Status status,
                                                        uint64_t startNanos, uint64_t stopNanos)
@@ -961,8 +971,7 @@ void ClientImpl::asyncWrite(const std::string &path, const std::string &workingD
                              Result result;
                              convertLeaderRPCBaseStatusToResult(status, result);
                              callback(result, startNanos, stopNanos);
-                             // TODO: this crashes sometimes
-                             //  exactlyOnceRPCHelper.doneWithRPC(exactlyOnce);
+                             exactlyOnceRPCHelper.doneWithRPC(exactlyOnce);
                          });
 }
 } // namespace LogCabin::Client

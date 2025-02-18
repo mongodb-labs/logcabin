@@ -88,7 +88,7 @@ class RPCServerTest : public ::testing::Test {
 TEST_F(RPCServerTest, handleRPC_normal) {
     server.registerService(1, service1, 1);
     service1->reply(0, request, reply);
-    ClientRPC rpc(session, 1, 1, 0, request);
+    ClientRPC rpc(session, 1, 1, 0, request, TimePoint::max());
     EXPECT_EQ(ClientRPC::Status::OK,
               rpc.waitForReply(NULL, NULL, TimePoint::max()));
 }
@@ -102,7 +102,7 @@ TEST_F(RPCServerTest, handleRPC_badHeader) {
 }
 
 TEST_F(RPCServerTest, handleRPC_badService) {
-    ClientRPC rpc(session, 1, 1, 0, request);
+    ClientRPC rpc(session, 1, 1, 0, request, TimePoint::max());
     EXPECT_EQ(ClientRPC::Status::INVALID_SERVICE,
               rpc.waitForReply(NULL, NULL, TimePoint::max()));
 }
@@ -120,10 +120,10 @@ TEST_F(RPCServerTest, registerService) {
     EXPECT_EQ(2U, server.services.size());
     service2->reply(0, request, reply);
     service2->reply(0, request, reply);
-    ClientRPC rpc(session, 1, 1, 0, request);
+    ClientRPC rpc(session, 1, 1, 0, request, TimePoint::max());
     EXPECT_EQ(ClientRPC::Status::OK,
               rpc.waitForReply(NULL, NULL, TimePoint::max()));
-    rpc = ClientRPC(session, 2, 1, 0, request);
+    rpc = ClientRPC(session, 2, 1, 0, request, TimePoint::max());
     EXPECT_EQ(ClientRPC::Status::OK,
               rpc.waitForReply(NULL, NULL, TimePoint::max()));
 }

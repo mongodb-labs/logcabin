@@ -83,7 +83,7 @@ class ServerClientServiceTest : public ::testing::Test {
     {
         RPC::ClientRPC rpc(session,
                            Protocol::Common::ServiceId::CLIENT_SERVICE,
-                           1, opCode, request);
+                           1, opCode, request, TimePoint::max());
         EXPECT_EQ(Status::OK, rpc.waitForReply(&response, NULL,
                                                TimePoint::max()))
             << rpc.getErrorMessage();
@@ -110,7 +110,7 @@ TEST_F(ServerClientServiceTest, handleRPCBadOpcode) {
     });
     RPC::ClientRPC rpc(session,
                        Protocol::Common::ServiceId::CLIENT_SERVICE,
-                       1, unassigned, request);
+                       1, unassigned, request, TimePoint::max());
     EXPECT_EQ(Status::INVALID_REQUEST, rpc.waitForReply(&response, NULL,
                                                         TimePoint::max()))
         << rpc.getErrorMessage();

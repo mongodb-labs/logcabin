@@ -66,7 +66,8 @@ class ClientRPC {
               uint16_t service,
               uint8_t serviceSpecificErrorVersion,
               uint16_t opCode,
-              const google::protobuf::Message& request);
+              const google::protobuf::Message& request,
+              TimePoint timeout);
 
     /**
      * Default constructor. This doesn't create a valid RPC, but it is useful
@@ -191,6 +192,10 @@ class ClientRPC {
     uint64_t getStopNanos() const {
         return opaqueRPC.stopNanos;
     }
+    
+    TimePoint getTimeout() const {
+        return timeout;
+    }
 
   private:
     /**
@@ -203,6 +208,8 @@ class ClientRPC {
      * Identifies the remote procedure within the Service to execute.
      */
     uint16_t opCode;
+    
+    TimePoint timeout;
 
     OpaqueClientRPC opaqueRPC;
 

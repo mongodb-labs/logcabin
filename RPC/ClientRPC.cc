@@ -33,9 +33,11 @@ ClientRPC::ClientRPC(std::shared_ptr<RPC::ClientSession> session,
                      uint16_t service,
                      uint8_t serviceSpecificErrorVersion,
                      uint16_t opCode,
-                     const google::protobuf::Message& request)
+                     const google::protobuf::Message& request,
+                     TimePoint timeout)
     : service(service)
     , opCode(opCode)
+    , timeout(timeout)
     , opaqueRPC() // placeholder, set again below
 {
     // Serialize the request into a Buffer
@@ -59,6 +61,7 @@ ClientRPC::ClientRPC(std::shared_ptr<RPC::ClientSession> session,
 ClientRPC::ClientRPC()
     : service(0)
     , opCode(0)
+    , timeout()
     , opaqueRPC()
 {
 }
@@ -66,6 +69,7 @@ ClientRPC::ClientRPC()
 ClientRPC::ClientRPC(ClientRPC&& other)
     : service(other.service)
     , opCode(other.opCode)
+    , timeout(other.timeout)
     , opaqueRPC(std::move(other.opaqueRPC))
 {
 }
@@ -79,6 +83,7 @@ ClientRPC::operator=(ClientRPC&& other)
 {
     service = other.service;
     opCode = other.opCode;
+    timeout = other.timeout;
     opaqueRPC = std::move(other.opaqueRPC);
     return *this;
 }

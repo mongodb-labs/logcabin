@@ -67,7 +67,8 @@ SessionManager::createSession(const RPC::Address& address,
                        Protocol::Common::ServiceId::CLIENT_SERVICE,
                        1,
                        Protocol::Client::OpCode::VERIFY_RECIPIENT,
-                       request);
+                       request,
+                       timeout);
 
     typedef RPC::ClientRPC::Status RPCStatus;
     Protocol::Client::VerifyRecipient::Response response;

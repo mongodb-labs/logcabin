@@ -117,7 +117,7 @@ class RPCClientRPCTest : public ::testing::Test {
 };
 
 TEST_F(RPCClientRPCTest, constructor) {
-    ClientRPC rpc(session, 2, 3, 4, payload);
+    ClientRPC rpc(session, 2, 3, 4, payload, TimePoint::max());
     while (!rpc.isReady()) {
         /* spin -- can't call waitForReply because it will PANIC */;
         usleep(100);
@@ -146,7 +146,7 @@ TEST_F(RPCClientRPCTest, constructor) {
 // move assignment: nothing to test
 
 TEST_F(RPCClientRPCTest, cancel) {
-    ClientRPC rpc(session, 2, 3, 4, payload);
+    ClientRPC rpc(session, 2, 3, 4, payload, TimePoint::max());
     rpc.cancel();
     EXPECT_EQ(ClientRPC::Status::RPC_CANCELED,
               rpc.waitForReply(NULL, NULL, TimePoint::max()));
@@ -155,7 +155,7 @@ TEST_F(RPCClientRPCTest, cancel) {
 
 TEST_F(RPCClientRPCTest, waitForReply_timeout) {
     rpcHandler.autoReply = false;
-    ClientRPC rpc(session, 2, 3, 4, payload);
+    ClientRPC rpc(session, 2, 3, 4, payload, TimePoint::max());
     EXPECT_EQ(ClientRPC::Status::TIMEOUT,
               rpc.waitForReply(NULL, NULL,
                                ClientRPC::Clock::now() +
@@ -173,7 +173,7 @@ TEST_F(RPCClientRPCTest, waitForReply_timeout) {
 // waitForReply_rpcFailed tested adequately in cancel()
 
 TEST_F(RPCClientRPCTest, waitForReply_tooShort) {
-    ClientRPC rpc(session, 2, 3, 4, payload);
+    ClientRPC rpc(session, 2, 3, 4, payload, TimePoint::max());
     deinit();
     EXPECT_DEATH({childDeathInit();
                   rpc.waitForReply(NULL, NULL, TimePoint::max());
@@ -182,7 +182,7 @@ TEST_F(RPCClientRPCTest, waitForReply_tooShort) {
 
 TEST_F(RPCClientRPCTest, waitForReply_ok) {
     makeServerRPC().reply(payload);
-    ClientRPC rpc(session, 2, 3, 4, payload);
+    ClientRPC rpc(session, 2, 3, 4, payload, TimePoint::max());
     EXPECT_EQ(ClientRPC::Status::OK,
               rpc.waitForReply(NULL, NULL, TimePoint::max()));
     LogCabin::ProtoBuf::TestMessage actual;
@@ -198,7 +198,7 @@ TEST_F(RPCClientRPCTest, waitForReply_ok) {
 
 TEST_F(RPCClientRPCTest, waitForReply_serviceSpecificError) {
     makeServerRPC().returnError(payload);
-    ClientRPC rpc(session, 2, 3, 4, payload);
+    ClientRPC rpc(session, 2, 3, 4, payload, TimePoint::max());
     EXPECT_EQ(ClientRPC::Status::SERVICE_SPECIFIC_ERROR,
               rpc.waitForReply(NULL, NULL, TimePoint::max()));
     LogCabin::ProtoBuf::TestMessage actual;
@@ -214,7 +214,7 @@ TEST_F(RPCClientRPCTest, waitForReply_serviceSpecificError) {
 
 TEST_F(RPCClientRPCTest, waitForReply_invalidVersion) {
     makeServerRPC().reject(Protocol::Status::INVALID_VERSION);
-    ClientRPC rpc(session, 2, 3, 4, payload);
+    ClientRPC rpc(session, 2, 3, 4, payload, TimePoint::max());
     deinit();
     EXPECT_DEATH({childDeathInit();
                   rpc.waitForReply(NULL, NULL, TimePoint::max());
@@ -223,7 +223,7 @@ TEST_F(RPCClientRPCTest, waitForReply_invalidVersion) {
 
 TEST_F(RPCClientRPCTest, waitForReply_invalidService) {
     makeServerRPC().rejectInvalidService();
-    ClientRPC rpc(session, 2, 3, 4, payload);
+    ClientRPC rpc(session, 2, 3, 4, payload, TimePoint::max());
     EXPECT_EQ(ClientRPC::Status::INVALID_SERVICE,
               rpc.waitForReply(NULL, NULL, TimePoint::max()));
     // should be able to call waitForReply multiple times
@@ -233,7 +233,7 @@ TEST_F(RPCClientRPCTest, waitForReply_invalidService) {
 
 TEST_F(RPCClientRPCTest, waitForReply_invalidRequest) {
     makeServerRPC().rejectInvalidRequest();
-    ClientRPC rpc(session, 2, 3, 4, payload);
+    ClientRPC rpc(session, 2, 3, 4, payload, TimePoint::max());
     EXPECT_EQ(ClientRPC::Status::INVALID_REQUEST,
               rpc.waitForReply(NULL, NULL, TimePoint::max()));
     // should be able to call waitForReply multiple times
@@ -244,7 +244,7 @@ TEST_F(RPCClientRPCTest, waitForReply_invalidRequest) {
 TEST_F(RPCClientRPCTest, waitForReply_unknownStatus) {
     int bad = 255;
     makeServerRPC().reject(Protocol::Status(bad));
-    ClientRPC rpc(session, 2, 3, 4, payload);
+    ClientRPC rpc(session, 2, 3, 4, payload, TimePoint::max());
     deinit();
     EXPECT_DEATH({childDeathInit();
                   rpc.waitForReply(NULL, NULL, TimePoint::max());
