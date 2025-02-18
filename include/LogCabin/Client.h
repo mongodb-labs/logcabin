@@ -20,6 +20,7 @@
  */
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <map>
 #include <mutex>
@@ -329,7 +330,7 @@ class Tree {
     Tree(const Tree& other);
     /// Assignment operator.
     Tree& operator=(const Tree& other);
-
+    
     /**
      * Set the working directory for this object. This directory will be
      * created if it does not exist.
@@ -564,6 +565,11 @@ class Tree {
      */
     void
     removeFileEx(const std::string& path);
+
+    // For benchmarking, read callback doesn't get the contents. If this were a real app it would.
+    using Callback = std::function<void(const Result&, uint64_t startNanos, uint64_t endNanos)>;
+    void asyncRead(const std::string& path, Callback callback);
+    void asyncWrite(const std::string& path, const std::string& contents, Callback callback);
 
   private:
     /**

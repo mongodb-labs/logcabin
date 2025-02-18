@@ -15,13 +15,16 @@
  */
 
 #include <cinttypes>
-#include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #include "build/Protocol/Client.pb.h"
 #include "Client/SessionManager.h"
+#include "Core/CompatAtomic.h"
 #include "Core/ConditionVariable.h"
+#include "Core/Util.h"
 #include "RPC/Address.h"
 #include "RPC/ClientRPC.h"
 
@@ -120,6 +123,12 @@ class LeaderRPCBase {
                         const google::protobuf::Message& request,
                         google::protobuf::Message& response,
                         TimePoint timeout) = 0;
+
+    typedef std::function<void(Status, uint64_t startNanos, uint64_t stopNanos)> Callback;
+    virtual void asyncCall(OpCode opCode, const google::protobuf::Message &request,
+                           TimePoint timeout, Callback callback)
+    {
+    }
 
     /**
      * An asynchronous version of call(). This allows multiple RPCs to be
@@ -253,8 +262,11 @@ class LeaderRPC : public LeaderRPCBase {
     /// See LeaderRPCBase::makeCall().
     std::unique_ptr<LeaderRPCBase::Call> makeCall();
 
-  private:
+    typedef std::function<void(Status status, uint64_t startNanos, uint64_t stopNanos)> Callback;
+    void asyncCall(OpCode opCode, const google::protobuf::Message &request, TimePoint timeout,
+                   Callback callback);
 
+private:
     /// See LeaderRPCBase::Call.
     class Call : public LeaderRPCBase::Call {
       public:
@@ -395,6 +407,12 @@ class LeaderRPC : public LeaderRPCBase {
      * two.
      */
     uint64_t failuresSinceLastSuccess;
+
+    Core::Util::ThreadSafeQueue<std::pair<std::shared_ptr<Call>, Callback>> callQueue;
+
+    void backgroundThreadMain();
+    std::thread backgroundThread;
+    std::atomic<bool> stopBackgroundThread;
 };
 
 } // namespace LogCabin::Client

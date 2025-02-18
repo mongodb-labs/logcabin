@@ -14,6 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <functional>
 #include <memory>
 #include <set>
 #include <string>
@@ -160,8 +161,14 @@ class ClientImpl {
                          const google::protobuf::Message& request,
                          google::protobuf::Message& response);
 
-  protected:
+    using Callback = std::function<void(const Result &, uint64_t startNanos, uint64_t endNanos)>;
+    void asyncRead(const std::string &path, const std::string &workingDirectory,
+                   const Condition &condition, TimePoint timeout, Callback callback);
+    void asyncWrite(const std::string &path, const std::string &workingDirectory,
+                    const std::string &contents, const Condition &condition, TimePoint timeout,
+                    Callback callback);
 
+protected:
     /**
      * Options/settings.
      */

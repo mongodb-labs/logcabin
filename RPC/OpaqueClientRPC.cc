@@ -28,6 +28,8 @@ OpaqueClientRPC::OpaqueClientRPC()
     , status(Status::NOT_READY)
     , reply()
     , errorMessage()
+    , startNanos(Clock::now().time_since_epoch().count())
+    , stopNanos(0)
 {
 }
 
@@ -55,6 +57,8 @@ OpaqueClientRPC::operator=(OpaqueClientRPC&& other)
     status = std::move(other.status);
     reply = std::move(other.reply);
     errorMessage = std::move(other.errorMessage);
+    startNanos = other.startNanos;
+    stopNanos = other.stopNanos;
     return *this;
 }
 
@@ -70,6 +74,7 @@ OpaqueClientRPC::cancel()
     session.reset();
     reply.reset();
     errorMessage = "RPC canceled by user";
+    stopNanos = Clock::now().time_since_epoch().count();
 }
 
 std::string
@@ -115,6 +120,7 @@ OpaqueClientRPC::waitForReply(TimePoint timeout)
     } else {
         errorMessage = "This RPC was never associated with a ClientSession.";
         status = Status::ERROR;
+        stopNanos = Clock::now().time_since_epoch().count();
     }
 }
 
@@ -125,6 +131,8 @@ OpaqueClientRPC::update()
 {
     if (status == Status::NOT_READY && session)
         session->update(*this);
+    if (status != Status::NOT_READY)
+        stopNanos = Clock::now().time_since_epoch().count();
 }
 
 ///// exported functions /////

@@ -179,6 +179,18 @@ class ClientRPC {
      *      Otherwise, an empty string.
      */
     std::string getErrorMessage() const;
+    
+    uint16_t getOpCode() const {
+        return opCode;
+    }
+    
+    uint64_t getStartNanos() const {
+        return opaqueRPC.startNanos;
+    }   
+    
+    uint64_t getStopNanos() const {
+        return opaqueRPC.stopNanos;
+    }
 
   private:
     /**

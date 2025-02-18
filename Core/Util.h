@@ -22,7 +22,10 @@
 
 #include <cassert>
 #include <cinttypes>
+#include <condition_variable>
 #include <functional>
+#include <mutex>
+#include <queue>
 #include <stdexcept>
 
 #ifndef LOGCABIN_CORE_UTIL_H
@@ -94,6 +97,36 @@ memcpy(void* dest,
 class ThreadInterruptedException : public std::runtime_error {
   public:
     ThreadInterruptedException();
+};
+
+template <typename T>
+class ThreadSafeQueue {
+private:
+    std::queue<T> queue_;
+    mutable std::mutex mutex_;
+    std::condition_variable cv_;
+
+public:
+    ThreadSafeQueue() : queue_(), mutex_(), cv_() {}
+
+    // Push an item into the queue
+    void push(T value) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        queue_.push(std::move(value));
+        cv_.notify_all();
+    }
+
+    // Try to pop an item with a timeout
+    bool pop(T& value, std::chrono::milliseconds timeout) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (!cv_.wait_for(lock, timeout, [this] { return !queue_.empty(); })) {
+            return false;
+        }
+
+        value = std::move(queue_.front());
+        queue_.pop();
+        return true;
+    }
 };
 
 } // namespace LogCabin::Core::Util

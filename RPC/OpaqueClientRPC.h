@@ -136,6 +136,16 @@ class OpaqueClientRPC {
      */
     void waitForReply(TimePoint timeout);
 
+    /**
+     * Start time of the RPC in nanoseconds since the epoch.
+     */
+    uint64_t startNanos;
+
+    /**
+     * Stop time of the RPC in nanoseconds since the epoch.
+     */
+    uint64_t stopNanos;
+
   private:
 
     /**

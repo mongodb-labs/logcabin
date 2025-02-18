@@ -138,7 +138,7 @@ def chart_unavailability():
             )
 
         interval = 1_000_000  # 1ms in nanos.
-        df["time_bin"] = (df["recordedAtNanos"] // interval) * interval
+        df["time_bin"] = (df["stopNanos"] // interval) * interval
         df_resampled = (
             df.groupby(["time_bin", "operationType"])
             .size()
@@ -163,7 +163,7 @@ def chart_unavailability():
         )
         # Cut off the first and last data.
         start_time = df_resampled["time_bin"].min() + 20 * interval
-        end_time = df_resampled["time_bin"].max() - 480 * interval
+        end_time = start_time + 3 * LEASE_TIMEOUT_MS * 1_000_000
         df_resampled = df_resampled[
             (df_resampled["time_bin"] >= start_time)
             & (df_resampled["time_bin"] <= end_time)
@@ -175,6 +175,8 @@ def chart_unavailability():
         for i, (name, options) in enumerate(OPTIONS.items())
     }
     y_lim = 1.1 * max(df["reads"].max() for df in dfs.values())
+    # TODO: remove
+    y_lim = 1.1 * max(dfs["defer\ncommit"]["reads"].max() for df in dfs.values())
     fig, axes = plt.subplots(len(OPTIONS), 1, sharex=True, sharey=True, figsize=(5, 5))
     axes[-1].set(xlabel=r"time in milliseconds $\rightarrow$")
 

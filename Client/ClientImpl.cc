@@ -198,7 +198,6 @@ treeCall(LeaderRPCBase& leaderRPC,
     }
 }
 
-
 } // anonymous namespace
 
 using Protocol::Client::OpCode;
@@ -892,6 +891,79 @@ ClientImpl::serverControl(const std::string& host,
     }
 }
 
+void convertLeaderRPCBaseStatusToResult(LeaderRPCBase::Status status, Result &result)
+{
+    switch (status)
+    {
+    case LeaderRPCBase::Status::OK:
+        result.status = Status::OK;
+        break;
+    case LeaderRPCBase::Status::TIMEOUT:
+        result.status = Status::TIMEOUT;
+        result.error = "Client-specified timeout elapsed";
+        break;
+    case LeaderRPCBase::Status::INVALID_REQUEST:
+        result.status = Status::INVALID_ARGUMENT;
+        result.error = "The server and/or replicated state machine doesn't support the RPC or "
+                       "claims the request is malformed";
+        break;
+    }
+}
 
+void ClientImpl::asyncRead(const std::string &path, const std::string &workingDirectory,
+                           const Condition &condition, TimePoint timeout, Callback callback)
+{
+    std::string realPath;
+    Result canonResult = canonicalize(path, workingDirectory, realPath);
+    if (canonResult.status != Status::OK)
+    {
+        callback(canonResult, 0, 0);
+        return;
+    }
+    Protocol::Client::ReadOnlyTree::Request request;
+    setCondition(request, condition);
+    request.mutable_read()->set_path(realPath);
+    Protocol::Client::StateMachineQuery::Request qrequest;
+    *qrequest.mutable_tree() = request;
+    leaderRPC->asyncCall(
+        Protocol::Client::OpCode::STATE_MACHINE_QUERY, qrequest, timeout,
+        [callback](LeaderRPCBase::Status status, uint64_t startNanos, uint64_t stopNanos)
+        {
+            Result result;
+            convertLeaderRPCBaseStatusToResult(status, result);
+            callback(result, startNanos, stopNanos);
+        });
+}
+
+void ClientImpl::asyncWrite(const std::string &path, const std::string &workingDirectory,
+                            const std::string &contents, const Condition &condition,
+                            TimePoint timeout, Callback callback)
+{
+    std::string realPath;
+    Result canonResult = canonicalize(path, workingDirectory, realPath);
+    if (canonResult.status != Status::OK)
+    {
+        callback(canonResult, 0, 0);
+        return;
+    }
+    Protocol::Client::ReadWriteTree::Request request;
+    *request.mutable_exactly_once() = exactlyOnceRPCHelper.getRPCInfo(timeout);
+    setCondition(request, condition);
+    request.mutable_write()->set_path(realPath);
+    request.mutable_write()->set_contents(contents);
+    Protocol::Client::StateMachineCommand::Request crequest;
+    *crequest.mutable_tree() = request;
+    auto exactlyOnce = request.exactly_once();
+    leaderRPC->asyncCall(Protocol::Client::OpCode::STATE_MACHINE_COMMAND, crequest, timeout,
+                         [callback, this, exactlyOnce](LeaderRPCBase::Status status,
+                                                       uint64_t startNanos, uint64_t stopNanos)
+                         {
+                             Result result;
+                             convertLeaderRPCBaseStatusToResult(status, result);
+                             callback(result, startNanos, stopNanos);
+                             // TODO: this crashes sometimes
+                             //  exactlyOnceRPCHelper.doneWithRPC(exactlyOnce);
+                         });
+}
 } // namespace LogCabin::Client
 } // namespace LogCabin

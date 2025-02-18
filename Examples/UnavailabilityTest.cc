@@ -16,15 +16,6 @@
  * Continuously read and write to LogCabin to test its availability.
  */
 
-// std::atomic header file renamed in gcc 4.5.
-// Clang uses <atomic> but has defines like gcc 4.2.
-#if __GNUC__ == 4 && __GNUC_MINOR__ < 5 && !__clang__
-#include <cstdatomic>
-#else
-#include <atomic>
-#endif
-#include <algorithm>
-#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -33,16 +24,15 @@
 #include <getopt.h>
 #include <iostream>
 #include <random>
-#include <thread>
+#include <sstream>
+#include <string>
 #include <unistd.h>
 #include <vector>
 
 #include <LogCabin/Client.h>
 #include <LogCabin/Debug.h>
 #include <LogCabin/Util.h>
-
-namespace
-{
+#include <cassert>
 
 using std::chrono::duration_cast;
 using std::chrono::high_resolution_clock;
@@ -56,8 +46,8 @@ using LogCabin::Client::Status;
 using LogCabin::Client::Tree;
 using LogCabin::Client::Util::parseNonNegativeDuration;
 
-const double WRITES_PER_US = 1 / 1000.;
-const double READS_PER_US = 2 / 1000.;
+const double WRITES_PER_US = 10 / 1000.;
+const double READS_PER_US = 20 / 1000.;
 
 enum OperationType
 {
@@ -255,9 +245,9 @@ private:
 };
 
 /**
- * Pair of start time and latency, both in nanoseconds.
+ * Start time, end time, latency, all in nanoseconds.
  */
-typedef std::pair<uint64_t, uint64_t> OperationResult;
+typedef std::tuple<uint64_t, uint64_t, uint64_t> OperationResult;
 
 /**
  * Return the time since the Unix epoch in nanoseconds.
@@ -274,71 +264,12 @@ uint64_t timeNanos()
     return uint64_t(now.tv_sec) * 1000 * 1000 * 1000 + uint64_t(now.tv_nsec);
 }
 
-/**
- * Do one operation.
- */
-void operationThreadMain(const OptionParser &options, Tree tree, const std::string &value,
-                         OperationType operationType, double ops_per_us, OperationResult &result)
+template <typename T> std::string toString(const T &t)
 {
-    // TODO: cache the zipf generator.
-    ZipfGenerator zipf(100, 1.0);
-    int key = zipf.generate();
-    uint64_t start =
-        duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
-    bool success = true;
-    if (operationType == OperationType::READ)
-    {
-        std::string contents;
-        auto result = tree.read(std::to_string(key), contents);
-        if (result.status != Status::OK && result.status != Status::LOOKUP_ERROR)
-        {
-            success = false; // Probably no lease, status INVALID_ARGUMENT.
-        }
-    }
-    else
-    {
-        tree.writeEx(std::to_string(key), value);
-    }
-
-    uint64_t end =
-        duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
-    auto latencyNanos = end - start;
-    if (success)
-    {
-        result.first = start;
-        result.second = latencyNanos;
-    }
+    std::stringstream ss;
+    ss << t;
+    return ss.str();
 }
-
-/**
- * Start a bunch of threads to do reads, or to do writes.
- */
-void schedulerThreadMain(const OptionParser &options, Tree tree, const std::string &value,
-                         OperationType operationType, double opsPerMicrosecond,
-                         uint64_t timeoutNanos, std::vector<OperationResult> &results)
-{
-    auto startNanos = timeNanos();
-    auto nowNanos = startNanos;
-    std::vector<std::thread> threads;
-    size_t i = 0;
-    while (nowNanos - startNanos < timeoutNanos)
-    {
-        assert(results.capacity() > i);
-        std::thread t(operationThreadMain, options, tree, value, operationType, opsPerMicrosecond,
-                      std::ref(results[i]));
-        threads.push_back(std::move(t));
-        ++i;
-        nowNanos = timeNanos();
-        auto nextTimeNanos = startNanos + uint64_t(double(i) * 1000 / opsPerMicrosecond);
-        usleep(std::max(0, int(nextTimeNanos - nowNanos)));
-    }
-
-    for (auto &t : threads)
-    {
-        t.join();
-    }
-}
-} // anonymous namespace
 
 int main(int argc, char **argv)
 {
@@ -347,46 +278,81 @@ int main(int argc, char **argv)
         OptionParser options(argc, argv);
         LogCabin::Client::Debug::setLogPolicy(
             LogCabin::Client::Debug::logPolicyFromString(options.logPolicy));
-        Cluster cluster = Cluster(options.cluster);
-        Tree tree = cluster.getTree();
-        tree.setTimeout(10000000000); // 10 seconds in nanoseconds.
+        ZipfGenerator zipf(100, 1.0);
         std::string value(options.size, 'v');
-        std::vector<OperationType> operationTypes = {OperationType::READ, OperationType::WRITE};
-        std::map<OperationType, std::vector<OperationResult>> resultPerThread;
-        std::vector<std::thread> threads;
+        std::random_device rd;
+        std::mt19937 rng(rd());
+        std::uniform_real_distribution<double> jitter_dist(0.5, 1.5); // TODO: use or remove
 
-        for (auto &operationType : operationTypes)
-        {
-            double opsPerMicrosecond =
-                operationType == OperationType::READ ? READS_PER_US : WRITES_PER_US;
-            size_t totalOps = size_t(double(options.timeoutNanos) * opsPerMicrosecond / 1000);
-            // Reserve extra space in case.
-            resultPerThread[operationType].resize(2 * totalOps);
-            std::thread t = std::thread(
-                schedulerThreadMain, std::ref(options), tree, std::ref(value), operationType,
-                opsPerMicrosecond, options.timeoutNanos, std::ref(resultPerThread[operationType]));
-            threads.push_back(std::move(t));
-        }
+        uint64_t now = timeNanos();
+        uint64_t nextReadTimeNanos = now;
+        uint64_t nextWriteTimeNanos = now;
+        uint64_t whenToStopNanos = now + options.timeoutNanos;
+        std::mutex resultsMutex;
+        std::map<OperationType, std::vector<OperationResult>> results;
 
-        for (auto &t : threads)
         {
-            t.join();
-        }
+            Cluster cluster = Cluster(options.cluster);
+            Tree tree = cluster.getTree();
+            tree.setTimeout(100000000UL); // 100ms
+
+            while (timeNanos() < whenToStopNanos)
+            {
+                if (now >= nextReadTimeNanos)
+                {
+                    int key = zipf.generate();
+                    tree.asyncRead(std::to_string(key),
+                                   [&](Result result, uint64_t startNanos, uint64_t stopNanos)
+                                   {
+                                       if (result.status == Status::OK)
+                                       {
+                                           std::lock_guard<std::mutex> lock(resultsMutex);
+                                           results[OperationType::READ].push_back(OperationResult(
+                                               startNanos, stopNanos, stopNanos - startNanos));
+                                       }
+                                   });
+                    nextReadTimeNanos += uint64_t(1000 / READS_PER_US);
+                }
+                if (now >= nextWriteTimeNanos)
+                {
+                    int key = zipf.generate();
+                    tree.asyncWrite(std::to_string(key), value,
+                                    [&](Result result, uint64_t startNanos, uint64_t stopNanos)
+                                    {
+                                        if (result.status == Status::OK)
+                                        {
+                                            std::lock_guard<std::mutex> lock(resultsMutex);
+                                            results[OperationType::WRITE].push_back(OperationResult(
+                                                startNanos, stopNanos, stopNanos - startNanos));
+                                        }
+                                    });
+                    nextWriteTimeNanos += uint64_t(1000 / WRITES_PER_US);
+                }
+
+                now = timeNanos();
+                auto nextOperationTimeNanos = std::min(nextReadTimeNanos, nextWriteTimeNanos);
+                if (nextOperationTimeNanos > now)
+                {
+                    __useconds_t sleep_us =
+                        static_cast<__useconds_t>((nextOperationTimeNanos - now) / 1000);
+                    usleep(sleep_us);
+                }
+            }
+        } // destroy Tree and Cluster so threads stop
 
         if (options.resultsFileName != "")
         {
+            std::lock_guard<std::mutex> lock(resultsMutex); // just in case
             std::ofstream f(options.resultsFileName);
-            f << "operationType,recordedAtNanos,latencyNanos" << std::endl;
+            f << "operationType,startNanos,stopNanos,latencyNanos" << std::endl;
 
-            for (const auto &operationType : operationTypes)
+            for (const auto &operationType : {OperationType::READ, OperationType::WRITE})
             {
-                auto result = resultPerThread[operationType];
+                auto result = results[operationType];
                 for (const auto &row : result)
                 {
-                    if (row.first != 0)
-                    {
-                        f << operationType << "," << row.first << "," << row.second << std::endl;
-                    }
+                    f << operationType << "," << std::get<0>(row) << "," << std::get<1>(row) << ","
+                      << std::get<2>(row) << std::endl;
                 }
             }
         }

@@ -57,10 +57,15 @@ def _make_options():
 OPTIONS = _make_options()
 
 
+def time_str():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+
+
 def is_leader(server: str) -> bool:
     try:
         out = run_command(
-            f"./build/Client/ServerControl --server={server} --timeout=1s stats get", quiet=True
+            f"./build/Client/ServerControl --server={server} --timeout=1s stats get",
+            quiet=True,
         )
         return "state: LEADER" in out
     except subprocess.CalledProcessError:
@@ -79,11 +84,13 @@ def kill_leader(when: float, servers: list[str]):
                 key_filename="/home/ubuntu/.ssh/jesse-2024.pem",
             )
             session = client.get_transport().open_session()
-            time.sleep(when - time.time())
-            print(f"Kill leader {s} at {datetime.now().strftime("%S.%f")}")
+            sleep_duration = when - time.time()
+            if sleep_duration > 0:
+                time.sleep(sleep_duration)
+            print(f"{time_str()} Kill leader {s}")
             session.exec_command("killall -9 LogCabin")
             client.close()
-            print(f"Killed leader {s} at {datetime.now().strftime("%S.%f")}")
+            print(f"{time_str()} Killed leader {s}")
             break
     else:
         raise RuntimeError("No leader found to kill")
@@ -168,17 +175,18 @@ ps aux | grep LogCabin""",
 
             t.join()
             if is_leader(servers[1]):
-                print("SUCCESS: serverId 2 became leader")
+                print(f"{time_str()} SUCCESS: serverId 2 became leader")
             else:
-                print("RETRY: serverId 2 didn't become leader")
+                print(f"{time_str()} RETRY: serverId 2 didn't become leader")
+                import sys; sys.exit(1)  # TODO: remove
                 continue
-            
+
             title("CLEANUP")
             for addr in servers:
                 run_ssh_command(
                     addr, "sudo killall -q -9 perf LogCabin Reconfigure || true"
                 )
-                
+
             succeeded = True
             break
 

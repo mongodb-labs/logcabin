@@ -23,6 +23,7 @@
 #include "Protocol/Common.h"
 #include "RPC/ClientSession.h"
 #include "RPC/ClientRPC.h"
+#include "build/Protocol/Client.pb.h"
 
 namespace LogCabin {
 namespace Client {
@@ -170,12 +171,74 @@ LeaderRPC::LeaderRPC(const RPC::Address& hosts,
     , leaderHint()
     , leaderSession() // set by connect()
     , failuresSinceLastSuccess(0)
+    , callQueue()
+    , stopBackgroundThread(false)
 {
+    backgroundThread = std::thread(&LeaderRPC::backgroundThreadMain, this);
 }
 
 LeaderRPC::~LeaderRPC()
 {
+    stopBackgroundThread = true;
+    // callQueue.push({nullptr, nullptr}); // Unblock the background thread if it's waiting
+    backgroundThread.join();
     leaderSession.reset();
+}
+
+void LeaderRPC::backgroundThreadMain()
+{
+    while (!stopBackgroundThread)
+    {
+        std::pair<std::shared_ptr<Call>, Callback> popped; // TODO: not shared, unique
+        if (!callQueue.pop(popped, std::chrono::milliseconds(100)))
+            continue;
+
+        auto call = popped.first;
+        auto callback = popped.second;
+        if (!call)
+            continue;
+
+        const auto &rpc = call->rpc;
+        LeaderRPC::Call::Status rpcStatus;
+        // Short timeout: if this RPC isn't ready yet, re-enqueue it and try the next one.
+        TimePoint timeout = Clock::now() + std::chrono::microseconds(100);
+        auto opCode = rpc.getOpCode();
+        if (opCode == OpCode::STATE_MACHINE_COMMAND)
+        {
+            // HACK: for benchmarking, violate layering, deserialize response here and discard.
+            Protocol::Client::ReadWriteTree::Response response;
+            rpcStatus = call->wait(response, timeout);
+        }
+        else if (opCode == OpCode::STATE_MACHINE_QUERY)
+        {
+            Protocol::Client::ReadOnlyTree::Response response;
+            rpcStatus = call->wait(response, timeout);
+        }
+        else
+        {
+            PANIC("Unexpected opCode %s", Protocol::Client::OpCode_Name(opCode).c_str());
+        }
+
+        Status status;
+        switch (rpcStatus)
+        {
+        case LeaderRPC::Call::Status::RETRY:
+            callQueue.push({call, callback});
+            continue;
+        case LeaderRPC::Call::Status::OK:
+            status = Status::OK;
+            break;
+        case LeaderRPC::Call::Status::TIMEOUT:
+            status = Status::TIMEOUT;
+            break;
+        case LeaderRPC::Call::Status::INVALID_REQUEST:
+            status = Status::INVALID_REQUEST;
+            break;
+        default:
+            PANIC("Unexpected LeaderRPC::Call::Status %d", rpcStatus);
+        }
+        callback(status, rpc.getStartNanos(), rpc.getStopNanos());
+    }
 }
 
 LeaderRPC::Status
@@ -199,6 +262,14 @@ LeaderRPC::call(OpCode opCode,
                 return Status::INVALID_REQUEST;
         }
     }
+}
+
+void LeaderRPC::asyncCall(OpCode opCode, const google::protobuf::Message &request,
+                          TimePoint timeout, Callback callback)
+{
+    auto call = std::make_shared<Call>(*this);
+    call->start(opCode, request, timeout);
+    callQueue.push({call, callback});
 }
 
 std::unique_ptr<LeaderRPCBase::Call>
