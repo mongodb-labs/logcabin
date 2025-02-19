@@ -439,7 +439,7 @@ ClientImpl::ClientImpl(const std::map<std::string, std::string>& options)
                              100UL * 1000 * 1000) // 100 ms
     , hosts()
     , leaderRPC()             // set in init()
-    , exactlyOnceRPCHelper(this)
+    , exactlyOnceRPCHelper(std::make_shared<ExactlyOnceRPCHelper>(this))
     , eventLoopThread()
 {
     NOTICE("Configuration settings:\n"
@@ -454,7 +454,7 @@ ClientImpl::ClientImpl(const std::map<std::string, std::string>& options)
 
 ClientImpl::~ClientImpl()
 {
-    exactlyOnceRPCHelper.exit();
+    exactlyOnceRPCHelper->exit();
     eventLoop.exit();
     if (eventLoopThread.joinable())
         eventLoopThread.join();
@@ -690,13 +690,13 @@ ClientImpl::makeDirectory(const std::string& path,
         return result;
     Protocol::Client::ReadWriteTree::Request request;
     *request.mutable_exactly_once() =
-        exactlyOnceRPCHelper.getRPCInfo(timeout);
+        exactlyOnceRPCHelper->getRPCInfo(timeout);
     setCondition(request, condition);
     request.mutable_make_directory()->set_path(realPath);
     Protocol::Client::ReadWriteTree::Response response;
     treeCall(*leaderRPC,
              request, response, timeout);
-    exactlyOnceRPCHelper.doneWithRPC(request.exactly_once());
+    exactlyOnceRPCHelper->doneWithRPC(request.exactly_once());
     if (response.status() != Protocol::Client::Status::OK)
         return treeError(response);
     return Result();
@@ -740,13 +740,13 @@ ClientImpl::removeDirectory(const std::string& path,
         return result;
     Protocol::Client::ReadWriteTree::Request request;
     *request.mutable_exactly_once() =
-        exactlyOnceRPCHelper.getRPCInfo(timeout);
+        exactlyOnceRPCHelper->getRPCInfo(timeout);
     setCondition(request, condition);
     request.mutable_remove_directory()->set_path(realPath);
     Protocol::Client::ReadWriteTree::Response response;
     treeCall(*leaderRPC,
              request, response, timeout);
-    exactlyOnceRPCHelper.doneWithRPC(request.exactly_once());
+    exactlyOnceRPCHelper->doneWithRPC(request.exactly_once());
     if (response.status() != Protocol::Client::Status::OK)
         return treeError(response);
     return Result();
@@ -765,14 +765,14 @@ ClientImpl::write(const std::string& path,
         return result;
     Protocol::Client::ReadWriteTree::Request request;
     *request.mutable_exactly_once() =
-        exactlyOnceRPCHelper.getRPCInfo(timeout);
+        exactlyOnceRPCHelper->getRPCInfo(timeout);
     setCondition(request, condition);
     request.mutable_write()->set_path(realPath);
     request.mutable_write()->set_contents(contents);
     Protocol::Client::ReadWriteTree::Response response;
     treeCall(*leaderRPC,
              request, response, timeout);
-    exactlyOnceRPCHelper.doneWithRPC(request.exactly_once());
+    exactlyOnceRPCHelper->doneWithRPC(request.exactly_once());
     if (response.status() != Protocol::Client::Status::OK)
         return treeError(response);
     return Result();
@@ -814,13 +814,13 @@ ClientImpl::removeFile(const std::string& path,
         return result;
     Protocol::Client::ReadWriteTree::Request request;
     *request.mutable_exactly_once() =
-        exactlyOnceRPCHelper.getRPCInfo(timeout);
+        exactlyOnceRPCHelper->getRPCInfo(timeout);
     setCondition(request, condition);
     request.mutable_remove_file()->set_path(realPath);
     Protocol::Client::ReadWriteTree::Response response;
     treeCall(*leaderRPC,
              request, response, timeout);
-    exactlyOnceRPCHelper.doneWithRPC(request.exactly_once());
+    exactlyOnceRPCHelper->doneWithRPC(request.exactly_once());
     if (response.status() != Protocol::Client::Status::OK)
         return treeError(response);
     return Result();
@@ -949,7 +949,7 @@ void ClientImpl::asyncWrite(const std::string &path, const std::string &workingD
         return;
     }
     Protocol::Client::ReadWriteTree::Request request;
-    auto exactlyOnce = exactlyOnceRPCHelper.getRPCInfo(timeout);
+    auto exactlyOnce = exactlyOnceRPCHelper->getRPCInfo(timeout);
     if (!exactlyOnce.has_first_outstanding_rpc() || !exactlyOnce.has_rpc_number())
     {
         Result result;
@@ -964,14 +964,15 @@ void ClientImpl::asyncWrite(const std::string &path, const std::string &workingD
     request.mutable_write()->set_contents(contents);
     Protocol::Client::StateMachineCommand::Request crequest;
     *crequest.mutable_tree() = request;
+    auto exactlyOnceRPCHelperPtr = exactlyOnceRPCHelper;
     leaderRPC->asyncCall(Protocol::Client::OpCode::STATE_MACHINE_COMMAND, crequest, timeout,
-                         [callback, this, exactlyOnce](LeaderRPCBase::Status status,
+                         [callback, exactlyOnceRPCHelperPtr, exactlyOnce](LeaderRPCBase::Status status,
                                                        uint64_t startNanos, uint64_t stopNanos)
                          {
+                             exactlyOnceRPCHelperPtr->doneWithRPC(exactlyOnce);
                              Result result;
                              convertLeaderRPCBaseStatusToResult(status, result);
                              callback(result, startNanos, stopNanos);
-                             exactlyOnceRPCHelper.doneWithRPC(exactlyOnce);
                          });
 }
 } // namespace LogCabin::Client

@@ -47,7 +47,7 @@ class ClientClusterTest : public ::testing::Test {
         client->leaderRPC = std::unique_ptr<Client::LeaderRPCBase>(mockRPC);
         cluster->clientImpl->init("127.0.0.1:0");
 
-        client->exactlyOnceRPCHelper.client = NULL;
+        client->exactlyOnceRPCHelper->client = NULL;
     }
     std::unique_ptr<Client::Cluster> cluster;
     Client::LeaderRPCMock* mockRPC;

@@ -333,12 +333,14 @@ protected:
         // ExactlyOnceRPCHelper is not copyable.
         ExactlyOnceRPCHelper(const ExactlyOnceRPCHelper&) = delete;
         ExactlyOnceRPCHelper& operator=(const ExactlyOnceRPCHelper&) = delete;
-    } exactlyOnceRPCHelper;
+    };
 
     /**
      * A thread that runs the Event::Loop.
      */
     std::thread eventLoopThread;
+
+    std::shared_ptr<ExactlyOnceRPCHelper> exactlyOnceRPCHelper;
 
     // ClientImpl is not copyable
     ClientImpl(const ClientImpl&) = delete;
