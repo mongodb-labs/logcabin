@@ -46,8 +46,8 @@ using LogCabin::Client::Status;
 using LogCabin::Client::Tree;
 using LogCabin::Client::Util::parseNonNegativeDuration;
 
-const double WRITES_PER_US = 1 / 1000.; // TODO: more
-const double READS_PER_US = 2 / 1000.;
+const double WRITES_PER_US = 10 / 1000.;
+const double READS_PER_US = 20 / 1000.;
 
 enum OperationType
 {
@@ -280,9 +280,6 @@ int main(int argc, char **argv)
             LogCabin::Client::Debug::logPolicyFromString(options.logPolicy));
         ZipfGenerator zipf(100, 1.0);
         std::string value(options.size, 'v');
-        std::random_device rd;
-        std::mt19937 rng(rd());
-        std::uniform_real_distribution<double> jitter_dist(0.5, 1.5); // TODO: use or remove
 
         uint64_t now = timeNanos();
         uint64_t nextReadTimeNanos = now;
@@ -341,8 +338,10 @@ int main(int argc, char **argv)
                     usleep(sleep_us);
                 }
             }
+            
+            usleep(1000000); 
         } // destroy Tree and Cluster so threads stop
-
+        
         if (options.resultsFileName != "")
         {
             std::lock_guard<std::mutex> lock(resultsMutex); // just in case
