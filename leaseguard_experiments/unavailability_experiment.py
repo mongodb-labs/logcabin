@@ -109,7 +109,7 @@ def main(servers: list[str], enabled_configs: list[BenchmarkOptions]):
         # electionTimeoutMilliseconds long for the sake of a pretty chart.
         write_config_files(servers, options, non_candidate_ids=[3])
         succeeded = False
-        for retry in range(20):  # Retry loop.
+        for retry in range(100):
             for server_id, addr in enumerate(servers, start=1):
                 title(f"SETUP {addr}")
                 run_ssh_command(
@@ -176,7 +176,9 @@ ps aux | grep LogCabin""",
             if is_leader(servers[1]):
                 print(f"{time_str()} SUCCESS: serverId 2 became leader")
             else:
-                print(f"{time_str()} RETRY: serverId 2 didn't become leader")
+                print(
+                    f"{time_str()} RETRY: attempt {retry} failed, serverId 2 didn't become leader"
+                )
                 continue
 
             title("CLEANUP")
