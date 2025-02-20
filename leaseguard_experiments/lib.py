@@ -1,5 +1,6 @@
 import io
 import subprocess
+import threading
 import time
 from typing import Any
 from dataclasses import dataclass, fields
@@ -67,27 +68,41 @@ class BenchmarkResult:
     p95latencyNanos: float
 
 
-def run_command(command: str, quiet: bool = False) -> str:
+def run_command(command: str, quiet: bool = False, timeout: float = None) -> str:
     print(command)
-    process = subprocess.Popen(
-        command,
-        shell=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        universal_newlines=True,
-    )
-
+    return_code = 0
     output = io.StringIO()
-    try:
-        for line in process.stdout:
-            if not quiet:
-                print(line, end="")
-            output.write(line)
-    finally:
-        process.wait()
 
-    if process.returncode:
-        raise subprocess.CalledProcessError(process.returncode, command)
+    def target():
+        nonlocal return_code
+
+        process = subprocess.Popen(
+            command,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+        )
+
+        try:
+            for line in process.stdout:
+                if not quiet:
+                    print(line, end="")
+                output.write(line)
+        finally:
+            process.wait()
+            return_code = process.returncode
+
+    thread = threading.Thread(target=target)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        subprocess.call(["pkill", "-f", command])
+        thread.join()
+        raise Exception(f"Command '{command}' timed out after {timeout} seconds")
+
+    if return_code != 0:
+        raise subprocess.CalledProcessError(return_code, command)
 
     return output.getvalue()
 

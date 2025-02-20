@@ -94,7 +94,7 @@ File::~File()
     if (ownership == CLOSE_ON_DESTROY) {
         int r = close(fd);
         if (r != 0)
-            PANIC("Could not close file %d: %s", fd, strerror(errno));
+            ERROR("Could not close file %d: %s", fd, strerror(errno));
     }
 }
 

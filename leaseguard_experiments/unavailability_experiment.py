@@ -46,8 +46,8 @@ def _make_options():
             leaseEnabled=leaseEnabled,
             deferCommitEnabled=deferCommitEnabled,
             inheritLeaseEnabled=inheritLeaseEnabled,
-            operations=9999999,  # Let Benchmark.cc's timeout end the trial.
-            threads=10,
+            operations=9999999,  # Let UnavailabilityTest.cc's timeout end the trial.
+            threads=10,  # Doesn't matter, UnavailabilityTest.cc is async.
             electionTimeoutMilliseconds=ELECTION_TIMEOUT_MS,
             delta=2 * ELECTION_TIMEOUT_MS,  # Test lease expiration > election timeout.
         )
@@ -103,11 +103,11 @@ def main(servers: list[str], enabled_configs: list[BenchmarkOptions]):
 
         print(options)
         # Since electionTimeoutRandomizationDisabled is true, when we kill serverId 1, serverId 2
-        # and 3 can compete for election. Fix that by disabling serverId 3. Now we have a new
-        # problem: if serverId 3 has a longer log than 2 at the time we kill 1, then 2 can't win the
+        # and 3 can compete for election. Fix that by disabling serverId 2. Now we have a new
+        # problem: if serverId 2 has a longer log than 3 at the time we kill 1, then 3 can't win the
         # election. In that case just retry. This is all a hack to make the election precisely
         # electionTimeoutMilliseconds long for the sake of a pretty chart.
-        write_config_files(servers, options, non_candidate_ids=[3])
+        write_config_files(servers, options, non_candidate_ids=[2])
         succeeded = False
         for retry in range(100):
             for server_id, addr in enumerate(servers, start=1):
@@ -144,9 +144,14 @@ ps aux | grep LogCabin""",
             time.sleep(5)
 
             title("RECONFIGURE")
-            run_command(
-                f"./build/Examples/Reconfigure --cluster={servers[0]} set {' '.join(servers)}"
-            )
+            try:
+                run_command(
+                    f"./build/Examples/Reconfigure --cluster={servers[0]} set {' '.join(servers)}",
+                    timeout=30,  # This command is prone to hanging if a server crashes
+                )
+            except Exception as e:
+                print(f"RETRY: attempt {retry}, Reconfigure failed: {e}")
+                continue
 
             title("HELLOWORLD")
             run_command(f"./build/Examples/HelloWorld --cluster={','.join(servers)}")
@@ -160,7 +165,7 @@ ps aux | grep LogCabin""",
                 },
             )
             t.start()
-            print(f"{time_str()} Start UnavailabilityTest at")
+            print(f"{time_str()} Start UnavailabilityTest")
             try:
                 run_command(
                     f"./build/Examples/UnavailabilityTest --cluster={','.join(servers)} "
@@ -173,11 +178,12 @@ ps aux | grep LogCabin""",
                 continue
 
             t.join()
-            if is_leader(servers[1]):
-                print(f"{time_str()} SUCCESS: serverId 2 became leader")
+            time.sleep(5)
+            if is_leader(servers[2]):
+                print(f"{time_str()} SUCCESS: serverId 3 became leader")
             else:
                 print(
-                    f"{time_str()} RETRY: attempt {retry} failed, serverId 2 didn't become leader"
+                    f"{time_str()} RETRY: attempt {retry} failed, serverId 3 didn't become leader"
                 )
                 continue
 
