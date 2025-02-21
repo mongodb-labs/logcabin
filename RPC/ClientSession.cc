@@ -102,7 +102,7 @@ ClientSession::MessageSocketHandler::handleReceivedMessage(
 
     auto it = session.responses.find(messageId);
     if (it == session.responses.end()) {
-        VERBOSE("Received an unexpected response with message ID %x/%lu. "
+        VERBOSE("Received an unexpected response with message ID %p/%lu. "
                 "This can happen for a number of reasons and is no cause "
                 "for alarm. For example, this happens if the RPC was "
                 "cancelled before its response arrived.",
@@ -370,7 +370,7 @@ ClientSession::~ClientSession()
 {
     timerMonitor.disableForever();
     messageSocket.reset();
-    VERBOSE("Destroying session %x to %s",
+    VERBOSE("Destroying session %p to %s",
             this, address.toString().c_str());
     for (auto it = responses.begin(); it != responses.end(); ++it)
         delete it->second;
@@ -384,7 +384,7 @@ ClientSession::sendRequest(Core::Buffer request)
         std::lock_guard<std::mutex> mutexGuard(mutex);
         messageId = nextMessageId;
         ++nextMessageId;
-        VERBOSE("Sending request with message ID %x/%lu to %s",
+        VERBOSE("Sending request with message ID %p/%lu to %s",
                 this, messageId, address.toString().c_str());
         responses[messageId] = new Response();
 
@@ -400,7 +400,7 @@ ClientSession::sendRequest(Core::Buffer request)
     if (messageSocket)
         messageSocket->sendMessage(messageId, std::move(request));
     else {
-        VERBOSE("Failed to send request with message ID %x/%lu to %s: "
+        VERBOSE("Failed to send request with message ID %p/%lu to %s: "
                 "session is closed",
                 this, messageId, address.toString().c_str());
     }
@@ -453,7 +453,7 @@ ClientSession::cancel(OpaqueClientRPC& rpc)
         response->status = Response::CANCELED;
         response->ready.notify_all();
     } else {
-        VERBOSE("Cancelling RPC with message ID %x/%lu to %s",
+        VERBOSE("Cancelling RPC with message ID %p/%lu to %s",
                 this, rpc.responseToken, address.toString().c_str());
         delete response;
         responses.erase(it);
@@ -496,7 +496,7 @@ ClientSession::update(OpaqueClientRPC& rpc)
     }
     rpc.session.reset();
 
-    VERBOSE("Received reply for RPC with message ID %x/%lu from %s",
+    VERBOSE("Received reply for RPC with message ID %p/%lu from %s",
             this, rpc.responseToken, address.toString().c_str());
     delete response;
     responses.erase(it);
@@ -520,7 +520,7 @@ ClientSession::wait(const OpaqueClientRPC& rpc, TimePoint timeout)
             return; // RPC has completed
         } else if (response->status == Response::CANCELED) {
             // RPC was cancelled, finish cleaning up
-            VERBOSE("RPC with message ID %x/%lu to %s was canceled",
+            VERBOSE("RPC with message ID %p/%lu to %s was canceled",
                     this, rpc.responseToken, address.toString().c_str());
             delete response;
             responses.erase(it);
