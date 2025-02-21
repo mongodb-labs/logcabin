@@ -39,17 +39,14 @@ def dataclass_fieldnames(dataclass_type):
     return [f.name for f in fields(dataclass_type)]
 
 
-@dataclass
+@dataclass(kw_only=True)
 class BenchmarkOptions:
     # camelCase for consistency with the names in LogCabin config file and C++.
-    latencyMs: int = 0
     quorumCheckOnRead: bool = False
     leaseEnabled: bool = False
     deferCommitEnabled: bool = False
     inheritLeaseEnabled: bool = False
     size: int = 1024
-    threads: int = 1
-    operations: int = 100000
     electionTimeoutMilliseconds: int = 500
     delta: int = 500  # Milliseconds.
 

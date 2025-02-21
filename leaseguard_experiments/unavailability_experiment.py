@@ -1,6 +1,7 @@
 """Test the effect of leases and optimizations on read/write availability."""
 
 import argparse
+from dataclasses import dataclass
 import os.path
 import subprocess
 import threading
@@ -26,6 +27,12 @@ LEASE_TIMEOUT_MS = 2 * ELECTION_TIMEOUT_MS
 KILL_LEADER_TIME_MS = ELECTION_TIMEOUT_MS
 
 
+@dataclass(kw_only=True)
+class UnavailabilityBenchmarkOptions(BenchmarkOptions):
+    writes_per_ms: int
+    reads_per_ms: int
+    
+
 def _make_options():
     options = {}
     for (
@@ -33,23 +40,25 @@ def _make_options():
         leaseEnabled,
         deferCommitEnabled,
         inheritLeaseEnabled,
+        writes_per_ms,
+        reads_per_ms,
         name,
     ) in [
-        (False, False, False, False, "inconsistent"),
-        (True, False, False, False, "quorum"),
-        (False, True, False, False, "lease"),
-        (False, True, True, False, "defer\ncommit"),
-        (False, True, True, True, "inherit\nlease"),
+        (False, False, False, False, 10, 20, "inconsistent"),
+        (True, False, False, False, 1, 2, "quorum"),  # Can't keep up with other configs
+        (False, True, False, False, 10, 20, "lease"),
+        (False, True, True, False, 10, 20, "defer\ncommit"),
+        (False, True, True, True, 10, 20, "inherit\nlease"),
     ]:
-        options[name] = BenchmarkOptions(
+        options[name] = UnavailabilityBenchmarkOptions(
             quorumCheckOnRead=quorumCheckOnRead,
             leaseEnabled=leaseEnabled,
             deferCommitEnabled=deferCommitEnabled,
             inheritLeaseEnabled=inheritLeaseEnabled,
-            operations=9999999,  # Let UnavailabilityTest.cc's timeout end the trial.
-            threads=10,  # Doesn't matter, UnavailabilityTest.cc is async.
             electionTimeoutMilliseconds=ELECTION_TIMEOUT_MS,
             delta=2 * ELECTION_TIMEOUT_MS,  # Test lease expiration > election timeout.
+            writes_per_ms=writes_per_ms,
+            reads_per_ms=reads_per_ms,
         )
     return options
 
@@ -170,6 +179,7 @@ ps aux | grep LogCabin""",
                 run_command(
                     f"./build/Examples/UnavailabilityTest --cluster={','.join(servers)} "
                     f"--size={options.size} --timeout={3 * LEASE_TIMEOUT_MS}ms "
+                    f"--writesPerMs={options.writes_per_ms} --readsPerMs={options.reads_per_ms} "
                     f"--out=unavailability_result.txt"
                 )
             except subprocess.CalledProcessError as e:

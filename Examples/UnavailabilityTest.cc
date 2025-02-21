@@ -46,9 +46,6 @@ using LogCabin::Client::Status;
 using LogCabin::Client::Tree;
 using LogCabin::Client::Util::parseNonNegativeDuration;
 
-const double WRITES_PER_US = 10 / 1000.;
-const double READS_PER_US = 20 / 1000.;
-
 enum OperationType
 {
     READ,
@@ -82,6 +79,8 @@ public:
         , size(1024)
         , timeoutNanos(parseNonNegativeDuration("30s"))
         , resultsFileName("")
+        , writesPerMs(10)
+        , readsPerMs(20)
     {
         while (true)
         {
@@ -92,8 +91,10 @@ public:
                                                   {"verbose", no_argument, NULL, 'v'},
                                                   {"verbosity", required_argument, NULL, 256},
                                                   {"out", required_argument, NULL, 'o'},
+                                                  {"writesPerMs", required_argument, NULL, 'w'},
+                                                  {"readsPerMs", required_argument, NULL, 'r'},
                                                   {0, 0, 0, 0}};
-            int c = getopt_long(argc, argv, "c:hs:t:o:n:v", longOptions, NULL);
+            int c = getopt_long(argc, argv, "c:hs:t:o:n:vw:r:", longOptions, NULL);
 
             // Detect the end of the options.
             if (c == -1)
@@ -121,6 +122,12 @@ public:
                 break;
             case 'o':
                 resultsFileName = optarg;
+                break;
+            case 'w':
+                writesPerMs = uint64_t(atol(optarg));
+                break;
+            case 'r':
+                readsPerMs = uint64_t(atol(optarg));
                 break;
             case '?':
             default:
@@ -175,7 +182,11 @@ public:
                   << "                          "
                   << "Patterns match filename prefixes or suffixes." << std::endl
                   << "                          "
-                  << "Example: Client@NOTICE,Test.cc@SILENT,VERBOSE." << std::endl;
+                  << "Example: Client@NOTICE,Test.cc@SILENT,VERBOSE." << std::endl
+                  << "  --writes-per-ms <num>   "
+                  << "Number of writes per millisecond [default: 10]" << std::endl
+                  << "  --reads-per-ms <num>    " << "Number of reads per millisecond [default: 20]"
+                  << std::endl;
     }
 
     int &argc;
@@ -185,6 +196,8 @@ public:
     uint64_t size;
     uint64_t timeoutNanos;
     std::string resultsFileName;
+    uint64_t writesPerMs;
+    uint64_t readsPerMs;
 };
 
 class ZipfGenerator
@@ -308,7 +321,7 @@ int main(int argc, char **argv)
                                                startNanos, stopNanos, stopNanos - startNanos));
                                        }
                                    });
-                    nextReadTimeNanos += uint64_t(1000 / READS_PER_US);
+                    nextReadTimeNanos += uint64_t(1000000 / options.readsPerMs);
                 }
                 if (now >= nextWriteTimeNanos)
                 {
@@ -326,7 +339,7 @@ int main(int argc, char **argv)
                                             VERBOSE("Write failed: %s", result.error.c_str());
                                         }
                                     });
-                    nextWriteTimeNanos += uint64_t(1000 / WRITES_PER_US);
+                    nextWriteTimeNanos += uint64_t(1000000 / options.writesPerMs);
                 }
 
                 now = timeNanos();

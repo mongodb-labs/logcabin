@@ -159,7 +159,7 @@ def chart_unavailability():
         ).fillna(0)
         # Apply rolling average.
         df_resampled[["reads", "writes"]] = (
-            df_resampled[["reads", "writes"]].rolling(window=20, min_periods=1).mean()
+            df_resampled[["reads", "writes"]].rolling(window=30, min_periods=1).mean()
         )
         # Cut off the first and last data.
         start_time = df_resampled["time_bin"].min() + 20 * interval
@@ -176,8 +176,8 @@ def chart_unavailability():
     }
     y_lim = 1.1 * max(df["reads"].max() for df in dfs.values())
     # TODO: remove
-    y_lim = 1.1 * max(dfs["defer\ncommit"]["reads"].max() for df in dfs.values())
-    fig, axes = plt.subplots(len(OPTIONS), 1, sharex=True, sharey=True, figsize=(5, 5))
+    y_lim = 1.1 * max(dfs["quorum"]["reads"].max() for df in dfs.values())
+    fig, axes = plt.subplots(len(OPTIONS), 1, sharex=True, sharey=False, figsize=(5, 5))
     axes[-1].set(xlabel=r"time in milliseconds $\rightarrow$")
 
     for i, (name, df) in enumerate(dfs.items()):
@@ -196,7 +196,7 @@ def chart_unavailability():
                     label=column,
                     linewidth=0.75,
                 )
-                ax.set_ylim(0, y_lim)
+                # ax.set_ylim(0, y_lim)
 
         # Leader crash.
         ax.axvline(x=KILL_LEADER_TIME_MS, color="red", linestyle="dotted")

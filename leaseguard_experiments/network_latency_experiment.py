@@ -5,7 +5,6 @@ import csv
 import os
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime
 
 from lib import (
     BenchmarkOptions,
@@ -30,12 +29,19 @@ args = parser.parse_args()
 SERVERS = args.servers.split(",")
 
 
+@dataclass(kw_only=True)
+class LatencyBenchmarkOptions(BenchmarkOptions):
+    latencyMs: int = 0
+    threads: int = 1
+    operations: int = 100000
+
+
 class Stats:
     CSV_FILE_PATH = os.path.dirname(__file__) + "/network_latency_experiment.csv"
 
     @dataclass
     class Row:
-        options: BenchmarkOptions
+        options: LatencyBenchmarkOptions
         result: BenchmarkResult
 
     def __init__(self):
@@ -51,12 +57,12 @@ class Stats:
                 for row in reader:
                     self.rows.append(
                         Stats.Row(
-                            options=dataclass_from_row(BenchmarkOptions, row),
+                            options=dataclass_from_row(LatencyBenchmarkOptions, row),
                             result=dataclass_from_row(BenchmarkResult, row),
                         )
                     )
 
-    def append(self, options: BenchmarkOptions, result: BenchmarkResult):
+    def append(self, options: LatencyBenchmarkOptions, result: BenchmarkResult):
         self.rows.append(Stats.Row(options=options, result=result))
 
     def save(self):
@@ -64,7 +70,7 @@ class Stats:
             writer = csv.DictWriter(
                 f,
                 fieldnames=(
-                    dataclass_fieldnames(BenchmarkOptions)
+                    dataclass_fieldnames(LatencyBenchmarkOptions)
                     + dataclass_fieldnames(BenchmarkResult)
                 ),
             )
@@ -72,7 +78,7 @@ class Stats:
             writer.writerows(asdict(row.options) | asdict(row.result) for row in self.rows)
 
 
-def run_benchmark(options: BenchmarkOptions, stats: Stats):
+def run_benchmark(options: LatencyBenchmarkOptions, stats: Stats):
     write_config_files(SERVERS, options)
 
     for server_id, addr in enumerate(SERVERS, start=1):
@@ -172,7 +178,7 @@ if __name__ == "__main__":
         (False, True, True, True),
     ]:
         for latencyMs in range(11):
-            options = BenchmarkOptions(
+            options = LatencyBenchmarkOptions(
                 latencyMs=latencyMs,
                 quorumCheckOnRead=quorumCheckOnRead,
                 leaseEnabled=leaseEnabled,
