@@ -167,7 +167,7 @@ StateMachine::query(const Query::Request& request,
         {
             if (!globals.inheritLeaseEnabled)
             {
-                WARNING("rejecting read, no lease, last applied term is past,"
+                VERBOSE("rejecting read, no lease, last applied term is past,"
                         " delta %f sec now %s lastAppliedTimeBounds %s,"
                         " diff %f sec, path '%s'",
                         double(globals.raft->LEASE_TIMEOUT_DELTA.count()) / 1e9,
@@ -181,7 +181,7 @@ StateMachine::query(const Query::Request& request,
 
             if (isLimboRead)
             {
-                WARNING("rejecting read, no lease,"
+                VERBOSE("rejecting read, no lease,"
                         " delta %f sec now %s lastAppliedTimeBounds %s,"
                         " diff %f sec, path '%s' is in limbo region",
                         double(globals.raft->LEASE_TIMEOUT_DELTA.count()) / 1e9,
@@ -428,6 +428,8 @@ void StateMachine::setLimboRegion(
     
     // Wake thread waiting in query(), perhaps spurious wakeup.
     entriesApplied.notify_all();
+
+    NOTICE("Set limbo paths, %ld entries, %ld unique", limboRegion.size(), limboPaths.size());
 }
 
 ////////// StateMachine private methods //////////

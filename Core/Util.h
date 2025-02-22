@@ -127,6 +127,11 @@ public:
         queue_.pop();
         return true;
     }
+    
+    size_t size() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return queue_.size();
+    }
 };
 
 } // namespace LogCabin::Core::Util
