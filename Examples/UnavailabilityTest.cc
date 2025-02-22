@@ -291,7 +291,7 @@ int main(int argc, char **argv)
         OptionParser options(argc, argv);
         LogCabin::Client::Debug::setLogPolicy(
             LogCabin::Client::Debug::logPolicyFromString(options.logPolicy));
-        ZipfGenerator zipf(100, 1.0);
+        ZipfGenerator zipf(1000, 0.5);
         std::string value(options.size, 'v');
 
         uint64_t now = timeNanos();
