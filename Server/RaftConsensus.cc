@@ -1662,36 +1662,17 @@ RaftConsensus::handleRequestVote(
     response.set_log_ok(logIsOk);
 }
 
-std::pair<RaftConsensus::ClientResult, uint64_t>
-RaftConsensus::replicate(const Core::Buffer& operation)
+void RaftConsensus::replicate2(const Core::Buffer &operation, ClientRequest request)
 {
     std::unique_lock<Mutex> lockGuard(mutex);
-    Log::Entry entry;
-    entry.set_type(Protocol::Raft::EntryType::DATA);
-    entry.set_data(operation.getData(), operation.getLength());
-    if (globals.leaseEnabled && !globals.deferCommitEnabled) {
-        while (true) {
-            auto leaseStartAt = leaderLeaseStart();
-            auto localNow = TimeBounds::localNow();
-            if (leaseStartAt < localNow.earliest) {
-                VERBOSE("not waiting for lease");
-                break;
-            }
-            
-            VERBOSE("waiting for lease, now %s, waiting for %lu", 
-                    localNow.toString().c_str(), leaseStartAt);
-            auto waitUntil = Clock::now() + std::chrono::milliseconds(100);
-            stateChanged.wait_until(lockGuard, waitUntil);
-        }
+
+    if (globals.leaseEnabled && !globals.deferCommitEnabled &&
+        leaderLeaseStart() >= TimeBounds::localNow().earliest)
+    {
+        NOTICE("Reject write, no lease");
+        return;
     }
 
-    return replicateEntry(entry, lockGuard);
-}
-
-void
-RaftConsensus::replicate2(const Core::Buffer& operation, ClientRequest request)
-{
-    std::unique_lock<Mutex> lockGuard(mutex);
     Log::Entry entry;
     entry.set_type(Protocol::Raft::EntryType::DATA);
     entry.set_data(operation.getData(), operation.getLength());
