@@ -435,7 +435,7 @@ ClientImpl::ClientImpl(const std::map<std::string, std::string>& options)
     , eventLoop()
     , clusterUUID()
     , sessionManager(eventLoop, config)
-    , sessionCreationBackoff(5,                   // 5 new connections per
+    , sessionCreationBackoff(500,                  // 50 new connections per
                              100UL * 1000 * 1000) // 100 ms
     , hosts()
     , leaderRPC()             // set in init()
