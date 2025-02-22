@@ -128,9 +128,10 @@ def chart_unavailability():
         ELECTION_TIMEOUT_MS,
         KILL_LEADER_TIME_MS,
         LEASE_TIMEOUT_MS,
+        UnavailabilityBenchmarkOptions,
     )
 
-    def resample_data(benchmark_index: int, options: BenchmarkOptions):
+    def resample_data(benchmark_index: int, options: UnavailabilityBenchmarkOptions):
         df = pd.read_csv(f"{_this_dir}/unavailability_experiment-{benchmark_index}.csv")
         for column in ["quorumCheckOnRead", "leaseEnabled", "deferCommitEnabled"]:
             assert df[column].nunique() == 1 and df[column].iloc[0] == getattr(
@@ -174,9 +175,6 @@ def chart_unavailability():
         name: resample_data(i, options)
         for i, (name, options) in enumerate(OPTIONS.items())
     }
-    y_lim = 1.1 * max(df["reads"].max() for df in dfs.values())
-    # TODO: remove
-    y_lim = 1.1 * max(dfs["quorum"]["reads"].max() for df in dfs.values())
     fig, axes = plt.subplots(len(OPTIONS), 1, sharex=True, sharey=False, figsize=(5, 5))
     axes[-1].set(xlabel=r"time in milliseconds $\rightarrow$")
 
@@ -184,9 +182,8 @@ def chart_unavailability():
         ax = axes[i]
         options = OPTIONS[name]
         x_min = df["time_bin"].min()
-        # Remove borders
         for spine in ax.spines.values():
-            spine.set_visible(False)
+            spine.set_linewidth(0.5)
 
         if len(df) > 0:
             for column in ["reads", "writes"]:
@@ -196,7 +193,7 @@ def chart_unavailability():
                     label=column,
                     linewidth=0.75,
                 )
-                # ax.set_ylim(0, y_lim)
+                ax.set_ylim(0, options.reads_per_ms * 2.5)
 
         # Leader crash.
         ax.axvline(x=KILL_LEADER_TIME_MS, color="red", linestyle="dotted")
@@ -215,7 +212,7 @@ def chart_unavailability():
             )
 
         ax.text(
-            1.02,
+            1.05,
             0.5,
             name,
             va="center",
@@ -224,25 +221,31 @@ def chart_unavailability():
             transform=ax.transAxes,
         )
 
+    label_y_top = OPTIONS["inconsistent"].reads_per_ms * 2
+    label_font_size = 10
     axes[0].text(
         KILL_LEADER_TIME_MS + 50,
-        int(y_lim * 0.85),
+        int(label_y_top) * 0.925,
         r"$\leftarrow$ leader crash",
         color="red",
         bbox=dict(facecolor="white", edgecolor="none"),
+        fontsize=label_font_size,
     )
     axes[0].text(
         KILL_LEADER_TIME_MS + ELECTION_TIMEOUT_MS + 50,
-        int(y_lim * 0.6),
+        int(label_y_top * 0.7),
         r"$\leftarrow$ new leader elected",
         color="green",
+        fontsize=label_font_size,
     )
     axes[2].text(
-        KILL_LEADER_TIME_MS + LEASE_TIMEOUT_MS + 50,
-        int(y_lim * 0.75),
-        r"$\leftarrow$ old lease expires",
+        KILL_LEADER_TIME_MS + LEASE_TIMEOUT_MS - 50,
+        int(label_y_top * 0.75),
+        r"old lease expires $\rightarrow$",
         color="purple",
-        # bbox=dict(facecolor="white", edgecolor="none"),
+        bbox=dict(facecolor="white", edgecolor="none"),
+        horizontalalignment="right",
+        fontsize=label_font_size,
     )
     fig.legend(
         loc="upper center",
@@ -250,6 +253,7 @@ def chart_unavailability():
         ncol=2,
         handles=[Line2D([0], [0], color=color) for color in ["C1", "C0"]],
         labels=["writes", "reads"],
+        frameon=False, # remove border
     )
     fig.text(0.002, 0.5, "operations per millisecond", va="center", rotation="vertical")
     fig.tight_layout()

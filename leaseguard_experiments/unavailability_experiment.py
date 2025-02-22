@@ -183,7 +183,7 @@ ps aux | grep LogCabin""",
                     f"--out=unavailability_result.txt"
                 )
             except subprocess.CalledProcessError as e:
-                # Probably serverId 2 didn't become leader. Retry.
+                # Probably serverId 3 didn't become leader. Retry.
                 print(f"RETRY: UnavailabilityTest failed: {e}")
                 continue
 
@@ -216,6 +216,7 @@ ps aux | grep LogCabin""",
         df["inheritLeaseEnabled"] = options.inheritLeaseEnabled
         csv_path = f"{os.path.splitext(__file__)[0]}-{option_index}.csv"
         df.to_csv(csv_path, index=False)
+        print(csv_path)
 
 
 if __name__ == "__main__":
