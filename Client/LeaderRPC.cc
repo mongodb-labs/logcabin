@@ -18,12 +18,14 @@
 
 #include "Client/Backoff.h"
 #include "Client/LeaderRPC.h"
-#include "include/LogCabin/Debug.h"
+#include "Core/ProtoBuf.h"
 #include "Core/Util.h"
 #include "Protocol/Common.h"
-#include "RPC/ClientSession.h"
 #include "RPC/ClientRPC.h"
+#include "RPC/ClientSession.h"
+#include "RPC/Protocol.h"
 #include "build/Protocol/Client.pb.h"
+#include "include/LogCabin/Debug.h"
 
 namespace LogCabin {
 namespace Client {
@@ -69,10 +71,10 @@ operator<<(std::ostream& os, const LeaderRPCBase::Call::Status& status)
 
 //// class LeaderRPC::Call ////
 
-LeaderRPC::Call::Call(LeaderRPC& leaderRPC)
+LeaderRPC::Call::Call(LeaderRPC &leaderRPC)
     : leaderRPC(leaderRPC)
     , cachedSession()
-    , rpc()
+    , rpc(nullptr)
 {
 }
 
@@ -80,25 +82,90 @@ LeaderRPC::Call::~Call()
 {
 }
 
-void
-LeaderRPC::Call::start(OpCode opCode,
-                       const google::protobuf::Message& request,
-                       TimePoint timeout)
+void LeaderRPC::Call::start(OpCode opCode, const google::protobuf::Message &request,
+                            TimePoint timeout, LeaderRPC::Call::Callback callback)
 {
+    typedef RPC::ClientRPC::Status RPCS;
+
     // Save a reference to the leaderSession
     cachedSession = leaderRPC.getSession(timeout);
-    rpc = RPC::ClientRPC(cachedSession,
-                         Protocol::Common::ServiceId::CLIENT_SERVICE,
-                         1,
-                         opCode,
-                         request,
-                         timeout);
+
+    // Construct a completion callback.
+    RPC::ClientRPC::Callback rpcCb;
+    if (callback)
+    {
+        rpcCb = [this, opCode, timeout, callback](RPCS status, const Core::Buffer &responseBuffer,
+                                                 uint64_t startNanos, uint64_t stopNanos)
+        {
+            Status leaderRpcStatus = Status::OK;
+            switch (status)
+            {
+            case RPCS::OK:
+                leaderRPC.reportSuccess(cachedSession);
+                leaderRpcStatus = Call::Status::OK;
+                break;
+            case RPCS::SERVICE_SPECIFIC_ERROR:
+            {
+                Protocol::Client::Error serviceSpecificError;
+                if (!Core::ProtoBuf::parse(responseBuffer, serviceSpecificError,
+                                           sizeof(RPC::Protocol::ResponseHeaderVersion1)))
+                {
+                    PANIC("Could not parse the protocol buffer out of the "
+                          "service-specific error details for RPC with opcode %u",
+                          opCode);
+                }
+
+                switch (serviceSpecificError.error_code())
+                {
+                case Protocol::Client::Error::NOT_LEADER:
+                    // The server we tried is not the current cluster leader.
+                    if (serviceSpecificError.has_leader_hint())
+                    {
+                        leaderRPC.reportRedirect(cachedSession, serviceSpecificError.leader_hint());
+                    }
+                    else
+                    {
+                        leaderRPC.reportNotLeader(cachedSession);
+                    }
+                    break;
+                default:
+                    PANIC("Unknown error code %u in service-specific "
+                          "error. This probably indicates a bug in the server",
+                          serviceSpecificError.error_code());
+                }
+            }
+            break;
+            case RPCS::RPC_FAILED:
+                leaderRPC.reportFailure(cachedSession);
+                break;
+            case RPCS::RPC_CANCELED:
+                break;
+            case RPCS::TIMEOUT:
+                leaderRpcStatus = Call::Status::TIMEOUT;
+                break;
+            case RPCS::INVALID_SERVICE:
+                PANIC("The server isn't running the ClientService");
+                break;
+            case RPCS::INVALID_REQUEST:
+                leaderRpcStatus = Call::Status::INVALID_REQUEST;
+                break;
+            }
+
+            callback(leaderRpcStatus, startNanos, stopNanos);
+        };
+    }
+    rpc = std::unique_ptr<RPC::ClientRPC>(
+        new RPC::ClientRPC(cachedSession, Protocol::Common::ServiceId::CLIENT_SERVICE, 1, opCode,
+                           request, timeout, std::move(rpcCb)));
 }
 
 void
 LeaderRPC::Call::cancel()
 {
-    rpc.cancel();
+    if (rpc)
+    {
+        rpc->cancel();
+    }
     cachedSession.reset();
 }
 
@@ -108,7 +175,7 @@ LeaderRPC::Call::wait(google::protobuf::Message& response,
 {
     typedef RPC::ClientRPC::Status RPCStatus;
     Protocol::Client::Error error;
-    RPCStatus status = rpc.waitForReply(&response, &error, timeout);
+    RPCStatus status = rpc->waitForReply(&response, &error, timeout);
 
     // Decode the response
     switch (status) {
@@ -172,80 +239,12 @@ LeaderRPC::LeaderRPC(const RPC::Address& hosts,
     , leaderHint()
     , leaderSession() // set by connect()
     , failuresSinceLastSuccess(0)
-    , callQueue()
-    , backgroundThread()
-    , stopBackgroundThread(false)
 {
-    backgroundThread = std::thread(&LeaderRPC::backgroundThreadMain, this);
 }
 
 LeaderRPC::~LeaderRPC()
 {
-    stopBackgroundThread = true;
-    callQueue.push({nullptr, nullptr}); // Unblock the background thread if it's waiting
-    backgroundThread.join();
     leaderSession.reset();
-}
-
-void LeaderRPC::backgroundThreadMain()
-{
-    while (!stopBackgroundThread)
-    {
-        std::pair<std::shared_ptr<Call>, Callback> popped; // TODO: not shared, unique
-        if (!callQueue.pop(popped, std::chrono::milliseconds(100)))
-            continue;
-
-        auto call = popped.first;
-        auto callback = popped.second;
-        if (!call)
-            continue;
-
-        const auto &rpc = call->rpc;
-        LeaderRPC::Call::Status rpcStatus;
-        // Short timeout: if this RPC isn't ready yet, re-enqueue it and try the next one.
-        TimePoint timeout = Clock::now() + std::chrono::microseconds(100);
-        auto opCode = rpc.getOpCode();
-        if (opCode == OpCode::STATE_MACHINE_COMMAND)
-        {
-            // HACK: for benchmarking, violate layering, deserialize response here and discard.
-            Protocol::Client::ReadWriteTree::Response response;
-            rpcStatus = call->wait(response, timeout);
-        }
-        else if (opCode == OpCode::STATE_MACHINE_QUERY)
-        {
-            Protocol::Client::ReadOnlyTree::Response response;
-            rpcStatus = call->wait(response, timeout);
-        }
-        else
-        {
-            PANIC("Unexpected opCode %s", Protocol::Client::OpCode_Name(opCode).c_str());
-        }
-
-        Status status;
-        switch (rpcStatus)
-        {
-        case LeaderRPC::Call::Status::RETRY:
-            callQueue.push({call, callback});
-            continue;
-        case LeaderRPC::Call::Status::OK:
-            status = Status::OK;
-            break;
-        case LeaderRPC::Call::Status::TIMEOUT:
-            if (Clock::now() > rpc.getTimeout()) {
-                status = Status::TIMEOUT;                
-                break;
-            } else {
-                callQueue.push({call, callback});
-                continue;
-            }
-        case LeaderRPC::Call::Status::INVALID_REQUEST:
-            status = Status::INVALID_REQUEST;
-            break;
-        default:
-            PANIC("Unexpected LeaderRPC::Call::Status %d", rpcStatus);
-        }
-        callback(status, rpc.getStartNanos(), rpc.getStopNanos());
-    }
 }
 
 LeaderRPC::Status
@@ -256,7 +255,7 @@ LeaderRPC::call(OpCode opCode,
 {
     while (true) {
         Call c(*this);
-        c.start(opCode, request, timeout);
+        c.start(opCode, request, timeout, {});
         Call::Status callStatus = c.wait(response, timeout);
         switch (callStatus) {
             case Call::Status::OK:
@@ -274,9 +273,29 @@ LeaderRPC::call(OpCode opCode,
 void LeaderRPC::asyncCall(OpCode opCode, const google::protobuf::Message &request,
                           TimePoint timeout, Callback callback)
 {
+    // Capture the Call in the std::move(callback) to prevent its deletion.
     auto call = std::make_shared<Call>(*this);
-    call->start(opCode, request, timeout);
-    callQueue.push({call, callback});
+    call->start(opCode, request, timeout,
+                [call, callback](Call::Status callStatus, uint64_t startNanos,
+                                                       uint64_t stopNanos)
+                {
+                    Status leaderRPCStatus;
+                    switch (callStatus)
+                    {
+                    case Call::Status::OK:
+                        leaderRPCStatus = Status::OK;
+                        break;
+                    case Call::Status::TIMEOUT:
+                        leaderRPCStatus = Status::TIMEOUT;
+                        break;
+                    case Call::Status::INVALID_REQUEST:
+                        leaderRPCStatus = Status::INVALID_REQUEST;
+                        break;
+                    case Call::Status::RETRY:
+                        PANIC("Unexpected status RETRY");
+                    }
+                    callback(leaderRPCStatus, startNanos, stopNanos);
+                });
 }
 
 std::unique_ptr<LeaderRPCBase::Call>

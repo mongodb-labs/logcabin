@@ -59,7 +59,7 @@ LeaderRPCMock::call(OpCode opCode,
     if (timeout < Clock::now())
         return Status::TIMEOUT;
     Call c(*this);
-    c.start(opCode, request, timeout);
+    c.start(opCode, request, timeout, {});
     c.wait(response, timeout);
     return Status::OK;
 }
@@ -70,10 +70,8 @@ LeaderRPCMock::Call::Call(LeaderRPCMock& leaderRPC)
 {
 }
 
-void
-LeaderRPCMock::Call::start(OpCode opCode,
-                           const google::protobuf::Message& request,
-                           TimePoint timeout)
+void LeaderRPCMock::Call::start(OpCode opCode, const google::protobuf::Message &request,
+                                TimePoint timeout, Callback callback)
 {
     MessagePtr requestCopy(request.New());
     requestCopy->CopyFrom(request);

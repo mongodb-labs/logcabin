@@ -50,8 +50,9 @@ class ClientSession {
     typedef Address::Clock Clock;
     /// Type for absolute time values used for timeouts.
     typedef Address::TimePoint TimePoint;
+    typedef std::function<void()> Callback;
 
-  private:
+private:
     /**
      * This constructor is private because the class must be allocated in a
      * particular way. See #makeSession().
@@ -120,7 +121,7 @@ class ClientSession {
      * \return
      *      This is be used to wait for and retrieve the reply to the RPC.
      */
-    OpaqueClientRPC sendRequest(Core::Buffer request);
+    OpaqueClientRPC sendRequest(Core::Buffer request, Callback callback = nullptr);
 
     /**
      * If the socket has been disconnected, return a descriptive message.
@@ -164,7 +165,10 @@ class ClientSession {
         /**
          * Constructor.
          */
-        Response();
+        Response(Callback callback = nullptr);
+        
+        void execCallback();
+        
         /**
          * Current state of the RPC.
          */
@@ -198,6 +202,8 @@ class ClientSession {
          * is disconnected, or the RPC is canceled.
          */
         Core::ConditionVariable ready;
+
+        Callback callback;
     };
 
     /**

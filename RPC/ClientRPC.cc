@@ -29,15 +29,13 @@ using RPC::Protocol::ResponseHeaderPrefix;
 using RPC::Protocol::ResponseHeaderVersion1;
 typedef RPC::Protocol::Status ProtocolStatus;
 
-ClientRPC::ClientRPC(std::shared_ptr<RPC::ClientSession> session,
-                     uint16_t service,
-                     uint8_t serviceSpecificErrorVersion,
-                     uint16_t opCode,
-                     const google::protobuf::Message& request,
-                     TimePoint timeout)
-    : service(service)
-    , opCode(opCode)
-    , timeout(timeout)
+ClientRPC::ClientRPC(std::shared_ptr<RPC::ClientSession> session, uint16_t service_,
+                     uint8_t serviceSpecificErrorVersion, uint16_t opCode_,
+                     const google::protobuf::Message &request, TimePoint timeout_,
+                     Callback callback)
+    : service(service_)
+    , opCode(opCode_)
+    , timeout(timeout_)
     , opaqueRPC() // placeholder, set again below
 {
     // Serialize the request into a Buffer
@@ -55,7 +53,95 @@ ClientRPC::ClientRPC(std::shared_ptr<RPC::ClientSession> session,
 
     // Send the request to the server
     assert(session); // makes debugging more obvious for somewhat common error
-    opaqueRPC = session->sendRequest(std::move(requestBuffer));
+    ClientSession::Callback sessionCb;
+    if (callback)
+    {
+        sessionCb = [this, callback]()
+        {
+            ClientRPC::Status clientStatus;
+
+            // HACK: the code below should be refactored with waitForReply().
+            switch (opaqueRPC.getStatus())
+            {
+            case OpaqueClientRPC::Status::NOT_READY:
+                clientStatus = Status::TIMEOUT;
+                break;
+            case OpaqueClientRPC::Status::OK:
+                clientStatus = Status::OK;
+                break;
+            case OpaqueClientRPC::Status::ERROR:
+                clientStatus = Status::RPC_FAILED;
+                break;
+            case OpaqueClientRPC::Status::CANCELED:
+                clientStatus = Status::RPC_CANCELED;
+                break;
+            }
+            const Core::Buffer *responseBuffer = opaqueRPC.peekReply();
+            if (!responseBuffer)
+            {
+                clientStatus = Status::TIMEOUT;
+            }
+            else
+            {
+                // Extract the response's status field.
+                if (responseBuffer->getLength() < sizeof(ResponseHeaderPrefix))
+                {
+                    PANIC("The response from the server for RPC to service %u, opcode "
+                          "%u was too short to be valid (%lu bytes). This probably "
+                          "indicates network or memory corruption.",
+                          service, opCode, responseBuffer->getLength());
+                }
+                ResponseHeaderPrefix responseHeaderPrefix =
+                    *static_cast<const ResponseHeaderPrefix *>(responseBuffer->getData());
+                responseHeaderPrefix.fromBigEndian();
+                if (responseHeaderPrefix.status == ProtocolStatus::INVALID_VERSION)
+                {
+                    // The server doesn't understand this version of the header
+                    // protocol. Since this library only runs version 1 of the
+                    // protocol, this shouldn't happen if servers continue supporting
+                    // version 1.
+                    PANIC("This client is too old to talk to the server. "
+                          "You'll need to update your client library.");
+                }
+
+                if (responseBuffer->getLength() < sizeof(ResponseHeaderVersion1))
+                {
+                    PANIC("The response from the server for RPC to service %u, opcode "
+                          "%u was too short to be valid. This probably indicates "
+                          "network or memory corruption.",
+                          service, opCode);
+                }
+                ResponseHeaderVersion1 responseHeader =
+                    *static_cast<const ResponseHeaderVersion1 *>(responseBuffer->getData());
+                responseHeader.fromBigEndian();
+
+                switch (responseHeader.prefix.status)
+                {
+                case ProtocolStatus::OK:
+                    clientStatus = Status::OK;
+                    break;
+                case ProtocolStatus::SERVICE_SPECIFIC_ERROR:
+                    clientStatus = Status::SERVICE_SPECIFIC_ERROR;
+                    break;
+                case ProtocolStatus::INVALID_SERVICE:
+                    clientStatus = Status::INVALID_SERVICE;
+                    return;
+                case ProtocolStatus::INVALID_REQUEST:
+                    clientStatus = Status::INVALID_REQUEST;
+                    break;
+                default:
+                    PANIC("Unknown status %u returned from server after sending it "
+                          "protocol version 1 in the request header for RPC to "
+                          "service %u, opcode %u. This probably indicates a bug in "
+                          "the server.",
+                          uint32_t(responseHeader.prefix.status), service, opCode);
+                }
+            } // if (responseBuffer)
+
+            callback(clientStatus, *responseBuffer, opaqueRPC.startNanos, opaqueRPC.stopNanos);
+        };
+    }
+    opaqueRPC = session->sendRequest(std::move(requestBuffer), std::move(sessionCb));
 }
 
 ClientRPC::ClientRPC()

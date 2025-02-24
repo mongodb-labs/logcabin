@@ -46,69 +46,10 @@ class ClientRPC {
     typedef OpaqueClientRPC::TimePoint TimePoint;
 
     /**
-     * Issue an RPC to a remote service.
-     * \param session
-     *      A connection to the remote server.
-     * \param service
-     *      Identifies the service running on the server.
-     *      See Protocol::Common::ServiceId.
-     * \param serviceSpecificErrorVersion
-     *      This tells the Service what service-specific errors the client
-     *      understands. Clients can expect services to not send
-     *      service-specific errors introduced in newer versions, but they
-     *      should remain compatible with older versions.
-     * \param opCode
-     *      Identifies the remote procedure within the Service to execute.
-     * \param request
-     *      The arguments to the remote procedure.
-     */
-    ClientRPC(std::shared_ptr<RPC::ClientSession> session,
-              uint16_t service,
-              uint8_t serviceSpecificErrorVersion,
-              uint16_t opCode,
-              const google::protobuf::Message& request,
-              TimePoint timeout);
-
-    /**
-     * Default constructor. This doesn't create a valid RPC, but it is useful
-     * as a placeholder.
-     */
-    ClientRPC();
-
-    /**
-     * Move constructor.
-     */
-    ClientRPC(ClientRPC&&);
-
-    /**
-     * Destructor.
-     */
-    ~ClientRPC();
-
-    /**
-     * Move assignment.
-     */
-    ClientRPC& operator=(ClientRPC&&);
-
-    /**
-     * Abort the RPC.
-     * The caller is no longer interested in its reply.
-     */
-    void cancel();
-
-    /**
-     * Indicate whether a response or error has been received for
-     * the RPC.
-     * \return
-     *      True means the reply is ready or an error has occurred; false
-     *      otherwise.
-     */
-    bool isReady();
-
-    /**
      * The return type of waitForReply().
      */
-    enum class Status {
+    enum class Status
+    {
         /**
          * The service returned a normal response. This is available in
          * 'response'.
@@ -147,6 +88,68 @@ class ClientRPC {
         INVALID_REQUEST,
     };
 
+    typedef std::function<void(ClientRPC::Status, const Core::Buffer &responseBuffer,
+                               uint64_t startNanos, uint64_t stopNanos)>
+        Callback;
+
+    /**
+     * Issue an RPC to a remote service.
+     * \param session
+     *      A connection to the remote server.
+     * \param service
+     *      Identifies the service running on the server.
+     *      See Protocol::Common::ServiceId.
+     * \param serviceSpecificErrorVersion
+     *      This tells the Service what service-specific errors the client
+     *      understands. Clients can expect services to not send
+     *      service-specific errors introduced in newer versions, but they
+     *      should remain compatible with older versions.
+     * \param opCode
+     *      Identifies the remote procedure within the Service to execute.
+     * \param request
+     *      The arguments to the remote procedure.
+     */
+    ClientRPC(std::shared_ptr<RPC::ClientSession> session, uint16_t service,
+              uint8_t serviceSpecificErrorVersion, uint16_t opCode,
+              const google::protobuf::Message &request, TimePoint timeout,
+              Callback callback = nullptr);
+
+    /**
+     * Default constructor. This doesn't create a valid RPC, but it is useful
+     * as a placeholder.
+     */
+    ClientRPC();
+
+    /**
+     * Move constructor.
+     */
+    ClientRPC(ClientRPC&&);
+
+    /**
+     * Destructor.
+     */
+    ~ClientRPC();
+
+    /**
+     * Move assignment.
+     */
+    ClientRPC& operator=(ClientRPC&&);
+
+    /**
+     * Abort the RPC.
+     * The caller is no longer interested in its reply.
+     */
+    void cancel();
+
+    /**
+     * Indicate whether a response or error has been received for
+     * the RPC.
+     * \return
+     *      True means the reply is ready or an error has occurred; false
+     *      otherwise.
+     */
+    bool isReady();
+
     /**
      * Wait for a reply to the RPC or an error.
      * Panics if the server responds but is not running the same protocol.
@@ -180,19 +183,7 @@ class ClientRPC {
      *      Otherwise, an empty string.
      */
     std::string getErrorMessage() const;
-    
-    uint16_t getOpCode() const {
-        return opCode;
-    }
-    
-    uint64_t getStartNanos() const {
-        return opaqueRPC.startNanos;
-    }   
-    
-    uint64_t getStopNanos() const {
-        return opaqueRPC.stopNanos;
-    }
-    
+
     TimePoint getTimeout() const {
         return timeout;
     }

@@ -118,9 +118,9 @@ class TreeLeaderRPC : public LeaderRPCBase {
             , request()
         {
         }
-        void start(OpCode _opCode,
-                   const google::protobuf::Message& _request,
-                   TimePoint _timeout) {
+        void start(OpCode _opCode, const google::protobuf::Message &_request, TimePoint _timeout,
+                   Callback callback)
+        {
             opCode = _opCode;
             request.reset(_request.New());
             request->CopyFrom(_request);

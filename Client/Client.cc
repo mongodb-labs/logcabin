@@ -457,15 +457,16 @@ void Tree::asyncRead(const std::string &path, Callback callback)
 {
     std::shared_ptr<const TreeDetails> treeDetails = getTreeDetails();
     treeDetails->clientImpl->asyncRead(path, treeDetails->workingDirectory, treeDetails->condition,
-                                       ClientImpl::absTimeout(treeDetails->timeoutNanos), callback);
+                                       ClientImpl::absTimeout(treeDetails->timeoutNanos),
+                                       std::move(callback));
 }
 
 void Tree::asyncWrite(const std::string &path, const std::string &contents, Callback callback)
 {
     std::shared_ptr<const TreeDetails> treeDetails = getTreeDetails();
-    treeDetails->clientImpl->asyncWrite(path, treeDetails->workingDirectory, contents,
-                                        treeDetails->condition,
-                                        ClientImpl::absTimeout(treeDetails->timeoutNanos), callback);
+    treeDetails->clientImpl->asyncWrite(
+        path, treeDetails->workingDirectory, contents, treeDetails->condition,
+        ClientImpl::absTimeout(treeDetails->timeoutNanos), std::move(callback));
 }
 
 Result

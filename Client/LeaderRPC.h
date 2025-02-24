@@ -168,6 +168,8 @@ class LeaderRPCBase {
         friend std::ostream& operator<<(std::ostream& os,
                                         const Status& server);
 
+        typedef std::function<void(Call::Status, uint64_t startNanos, uint64_t stopNanos)> Callback;
+
         /**
          * Constructor.
          */
@@ -190,9 +192,10 @@ class LeaderRPCBase {
          *      connection to the leader and use an invalid session, which will
          *      cause the RPC to fail later.
          */
-        virtual void start(OpCode opCode,
-                           const google::protobuf::Message& request,
-                           TimePoint timeout) = 0;
+        virtual void start(OpCode opCode, 
+                           const google::protobuf::Message &request, 
+                           TimePoint timeout,
+                           Callback callback = {}) = 0;
         /**
          * Cancel the RPC. This may only be called after start(), but it may
          * be called safely from a separate thread.
@@ -270,24 +273,22 @@ private:
     /// See LeaderRPCBase::Call.
     class Call : public LeaderRPCBase::Call {
       public:
-        explicit Call(LeaderRPC& leaderRPC);
-        ~Call();
-        void start(OpCode opCode,
-                   const google::protobuf::Message& request,
-                   TimePoint timeout);
-        void cancel();
-        Status wait(google::protobuf::Message& response,
-                    TimePoint timeout);
-        LeaderRPC& leaderRPC;
-        /**
-         * Copy of leaderSession when the RPC was started (might have changed
-         * since).
-         */
-        std::shared_ptr<RPC::ClientSession> cachedSession;
-        /**
-         * RPC object which may be canceled.
-         */
-        RPC::ClientRPC rpc;
+          explicit Call(LeaderRPC &leaderRPC);
+          ~Call();
+          void start(OpCode opCode, const google::protobuf::Message &request, TimePoint timeout,
+                     Callback callback = {});
+          void cancel();
+          Status wait(google::protobuf::Message &response, TimePoint timeout);
+          LeaderRPC &leaderRPC;
+          /**
+           * Copy of leaderSession when the RPC was started (might have changed
+           * since).
+           */
+          std::shared_ptr<RPC::ClientSession> cachedSession;
+          /**
+           * RPC object which may be canceled.
+           */
+          std::unique_ptr<RPC::ClientRPC> rpc;
     };
 
     /**
@@ -407,12 +408,6 @@ private:
      * two.
      */
     uint64_t failuresSinceLastSuccess;
-
-    Core::Util::ThreadSafeQueue<std::pair<std::shared_ptr<Call>, Callback>> callQueue;
-
-    void backgroundThreadMain();
-    std::thread backgroundThread;
-    std::atomic<bool> stopBackgroundThread;
 };
 
 } // namespace LogCabin::Client

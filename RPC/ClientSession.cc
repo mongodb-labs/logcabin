@@ -82,7 +82,7 @@ ClientSession::MessageSocketHandler::handleReceivedMessage(
         MessageId messageId,
         Core::Buffer message)
 {
-    std::lock_guard<std::mutex> mutexGuard(session.mutex);
+    std::unique_lock<std::mutex> mutexGuard(session.mutex);
 
     if (messageId == Protocol::Common::PING_MESSAGE_ID) {
         if (session.numActiveRPCs > 0 && session.activePing) {
@@ -130,6 +130,8 @@ ClientSession::MessageSocketHandler::handleReceivedMessage(
     response.status = Response::HAS_REPLY;
     response.reply = std::move(message);
     response.ready.notify_all();
+    mutexGuard.unlock();
+    response.execCallback();
 }
 
 void
@@ -137,7 +139,8 @@ ClientSession::MessageSocketHandler::handleDisconnect()
 {
     VERBOSE("Disconnected from server %s",
             session.address.toString().c_str());
-    std::lock_guard<std::mutex> mutexGuard(session.mutex);
+    std::unique_lock<std::mutex> mutexGuard(session.mutex);
+    std::vector<Callback> callbacks;
     if (session.errorMessage.empty()) {
         // Fail all current and future RPCs.
         session.errorMessage = ("Disconnected from server " +
@@ -148,18 +151,39 @@ ClientSession::MessageSocketHandler::handleDisconnect()
              ++it) {
             Response* response = it->second;
             response->ready.notify_all();
+            if (response->callback)
+            {
+                callbacks.push_back(std::move(response->callback));
+            }
         }
+    }
+
+    mutexGuard.unlock();
+    for (const auto &callback : callbacks)
+    {
+        callback();
     }
 }
 
 ////////// ClientSession::Response //////////
 
-ClientSession::Response::Response()
+ClientSession::Response::Response(Callback callback)
     : status(Response::WAITING)
     , reply()
     , hasWaiter(false)
     , ready()
+    , callback(std::move(callback))
 {
+}
+
+void ClientSession::Response::execCallback()
+{
+    if (callback)
+    {
+        // In case callback() deletes this.
+        auto cb = std::move(callback);
+        cb();
+    }
 }
 
 ////////// ClientSession::Timer //////////
@@ -173,7 +197,7 @@ ClientSession::Timer::Timer(ClientSession& session)
 void
 ClientSession::Timer::handleTimerEvent()
 {
-    std::lock_guard<std::mutex> mutexGuard(session.mutex);
+    std::unique_lock<std::mutex> mutexGuard(session.mutex);
 
     // Handle "spurious" wake-ups.
     if (!session.messageSocket ||
@@ -202,11 +226,21 @@ ClientSession::Timer::handleTimerEvent()
                                 session.address.toString() +
                                 " timed out");
         // Notify any waiting RPCs.
+        std::vector<Callback> callbacks;
         for (auto it = session.responses.begin();
              it != session.responses.end();
              ++it) {
             Response* response = it->second;
             response->ready.notify_all();
+            if (response->callback)
+            {
+                callbacks.push_back(std::move(response->callback));
+            }
+            mutexGuard.unlock();
+            for (const auto &callback : callbacks)
+            {
+                callback();
+            }
         }
     }
 }
@@ -370,23 +404,21 @@ ClientSession::~ClientSession()
 {
     timerMonitor.disableForever();
     messageSocket.reset();
-    VERBOSE("Destroying session %p to %s",
-            this, address.toString().c_str());
     for (auto it = responses.begin(); it != responses.end(); ++it)
+    {
+        it->second->execCallback();
         delete it->second;
+    }
 }
 
-OpaqueClientRPC
-ClientSession::sendRequest(Core::Buffer request)
+OpaqueClientRPC ClientSession::sendRequest(Core::Buffer request, Callback callback)
 {
     MessageSocket::MessageId messageId;
     {
         std::lock_guard<std::mutex> mutexGuard(mutex);
         messageId = nextMessageId;
         ++nextMessageId;
-        VERBOSE("Sending request with message ID %p/%lu to %s",
-                this, messageId, address.toString().c_str());
-        responses[messageId] = new Response();
+        responses[messageId] = new Response(std::move(callback));
 
         ++numActiveRPCs;
         if (numActiveRPCs == 1) {
@@ -407,6 +439,8 @@ ClientSession::sendRequest(Core::Buffer request)
     OpaqueClientRPC rpc;
     rpc.session = self.lock();
     rpc.responseToken = messageId;
+    if (!messageSocket)
+        rpc.cancel(); // invokes callback
     return rpc;
 }
 
@@ -444,7 +478,8 @@ ClientSession::cancel(OpaqueClientRPC& rpc)
     //    the Response's status as CANCELED, and wait() will delete it later.
     // 2. If there's no thread currently blocked in wait(), the Response is
     //    deleted entirely.
-    std::lock_guard<std::mutex> mutexGuard(mutex);
+    std::unique_lock<std::mutex> mutexGuard(mutex);
+    Callback callback;
     auto it = responses.find(rpc.responseToken);
     if (it == responses.end())
         return;
@@ -453,8 +488,7 @@ ClientSession::cancel(OpaqueClientRPC& rpc)
         response->status = Response::CANCELED;
         response->ready.notify_all();
     } else {
-        VERBOSE("Cancelling RPC with message ID %p/%lu to %s",
-                this, rpc.responseToken, address.toString().c_str());
+        callback = std::move(response->callback);
         delete response;
         responses.erase(it);
     }
@@ -464,6 +498,12 @@ ClientSession::cancel(OpaqueClientRPC& rpc)
     // up an extra time and clean up. Otherwise, we'd need to grab an
     // Event::Loop::Lock prior to the mutex to call deschedule() without
     // inducing deadlock.
+
+    mutexGuard.unlock();
+    if (callback)
+    {
+        callback();
+    }
 }
 
 void
@@ -495,9 +535,6 @@ ClientSession::update(OpaqueClientRPC& rpc)
         return; // not ready
     }
     rpc.session.reset();
-
-    VERBOSE("Received reply for RPC with message ID %p/%lu from %s",
-            this, rpc.responseToken, address.toString().c_str());
     delete response;
     responses.erase(it);
 }
@@ -516,12 +553,11 @@ ClientSession::wait(const OpaqueClientRPC& rpc, TimePoint timeout)
         if (it == responses.end())
             return; // RPC was cancelled or already updated
         Response* response = it->second;
+        assert(!response->callback); // Should either wait or complete async, not both.
         if (response->status == Response::HAS_REPLY) {
             return; // RPC has completed
         } else if (response->status == Response::CANCELED) {
             // RPC was cancelled, finish cleaning up
-            VERBOSE("RPC with message ID %p/%lu to %s was canceled",
-                    this, rpc.responseToken, address.toString().c_str());
             delete response;
             responses.erase(it);
             return;
@@ -535,6 +571,5 @@ ClientSession::wait(const OpaqueClientRPC& rpc, TimePoint timeout)
         response->hasWaiter = false;
     }
 }
-
 } // namespace LogCabin::RPC
 } // namespace LogCabin

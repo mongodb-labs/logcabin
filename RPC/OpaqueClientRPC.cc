@@ -22,19 +22,21 @@ namespace LogCabin {
 namespace RPC {
 
 OpaqueClientRPC::OpaqueClientRPC()
-    : mutex()
+    : startNanos(Clock::now().time_since_epoch().count())
+    , stopNanos(0)
+    , mutex()
     , session()
     , responseToken(~0UL)
     , status(Status::NOT_READY)
     , reply()
     , errorMessage()
-    , startNanos(Clock::now().time_since_epoch().count())
-    , stopNanos(0)
 {
 }
 
-OpaqueClientRPC::OpaqueClientRPC(OpaqueClientRPC&& other)
-    : mutex()
+OpaqueClientRPC::OpaqueClientRPC(OpaqueClientRPC &&other)
+    : startNanos(other.startNanos)
+    , stopNanos(other.stopNanos)
+    , mutex()
     , session(std::move(other.session))
     , responseToken(std::move(other.responseToken))
     , status(std::move(other.status))

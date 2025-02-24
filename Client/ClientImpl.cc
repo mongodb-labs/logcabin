@@ -375,8 +375,7 @@ ClientImpl::ExactlyOnceRPCHelper::keepAliveThreadMain()
             trequest.mutable_write()->set_contents("you shouldn't see this!");
             Protocol::Client::StateMachineCommand::Response response;
             keepAliveCall = client->leaderRPC->makeCall();
-            keepAliveCall->start(OpCode::STATE_MACHINE_COMMAND, request,
-                                 TimePoint::max());
+            keepAliveCall->start(OpCode::STATE_MACHINE_COMMAND, request, TimePoint::max(), {});
             LeaderRPCBase::Call::Status callStatus;
             {
                 // release lock to allow concurrent cancellation
@@ -430,17 +429,17 @@ ClientImpl::absTimeout(uint64_t relTimeoutNanos)
         return then;
 }
 
-ClientImpl::ClientImpl(const std::map<std::string, std::string>& options)
+ClientImpl::ClientImpl(const std::map<std::string, std::string> &options)
     : config(options)
     , eventLoop()
     , clusterUUID()
     , sessionManager(eventLoop, config)
-    , sessionCreationBackoff(500,                  // 50 new connections per
+    , sessionCreationBackoff(500,                 // 50 new connections per
                              100UL * 1000 * 1000) // 100 ms
     , hosts()
-    , leaderRPC()             // set in init()
-    , exactlyOnceRPCHelper(std::make_shared<ExactlyOnceRPCHelper>(this))
+    , leaderRPC() // set in init()
     , eventLoopThread()
+    , exactlyOnceRPCHelper(std::make_shared<ExactlyOnceRPCHelper>(this))
 {
     NOTICE("Configuration settings:\n"
            "# begin config\n"
@@ -966,8 +965,8 @@ void ClientImpl::asyncWrite(const std::string &path, const std::string &workingD
     *crequest.mutable_tree() = request;
     auto exactlyOnceRPCHelperPtr = exactlyOnceRPCHelper;
     leaderRPC->asyncCall(Protocol::Client::OpCode::STATE_MACHINE_COMMAND, crequest, timeout,
-                         [callback, exactlyOnceRPCHelperPtr, exactlyOnce](LeaderRPCBase::Status status,
-                                                       uint64_t startNanos, uint64_t stopNanos)
+                         [callback, exactlyOnceRPCHelperPtr, exactlyOnce](
+                             LeaderRPCBase::Status status, uint64_t startNanos, uint64_t stopNanos)
                          {
                              exactlyOnceRPCHelperPtr->doneWithRPC(exactlyOnce);
                              Result result;

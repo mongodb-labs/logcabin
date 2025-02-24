@@ -134,8 +134,7 @@ TEST_F(ClientLeaderRPCTest, Call_start_timeout) {
     EXPECT_EQ("Closed session: Failed to create session to leader: "
               "timeout expired",
               call.cachedSession->toString());
-    EXPECT_EQ("Failed to create session to leader: timeout expired",
-              call.rpc.getErrorMessage());
+    EXPECT_EQ("Failed to create session to leader: timeout expired", call.rpc->getErrorMessage());
     EXPECT_EQ(LeaderRPCBase::Call::Status::TIMEOUT,
               call.wait(response, TimePoint::min()));
     EXPECT_FALSE(leaderRPC->leaderSession.get());

@@ -68,9 +68,8 @@ class LeaderRPCMock : public LeaderRPCBase {
     class Call : public LeaderRPCBase::Call {
       public:
         explicit Call(LeaderRPCMock& leaderRPC);
-        void start(OpCode opCode,
-                   const google::protobuf::Message& request,
-                   TimePoint timeout);
+        void start(OpCode opCode, const google::protobuf::Message &request, TimePoint timeout,
+                   Callback callback);
         void cancel();
         Status wait(google::protobuf::Message& response,
                     TimePoint timeout);
