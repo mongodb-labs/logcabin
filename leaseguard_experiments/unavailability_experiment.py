@@ -74,10 +74,12 @@ def is_leader(server: str) -> bool:
     try:
         out = run_command(
             f"./build/Client/ServerControl --server={server} --timeout=1s stats get",
+            timeout=5,
             quiet=True,
         )
         return "state: LEADER" in out
-    except subprocess.CalledProcessError:
+    except Exception as e:
+        print(f"Failed to check leader for {server}: {e}")
         return False
 
 
@@ -163,7 +165,7 @@ ps aux | grep LogCabin""",
                 continue
 
             title("HELLOWORLD")
-            run_command(f"./build/Examples/HelloWorld --cluster={','.join(servers)}")
+            run_command(f"./build/Examples/HelloWorld --cluster={','.join(servers)}", timeout=30)
 
             title("EXPERIMENT")
             t = threading.Thread(
@@ -176,13 +178,15 @@ ps aux | grep LogCabin""",
             t.start()
             print(f"{time_str()} Start UnavailabilityTest")
             try:
-                run_command(
+                unavailability_test_cmd = (
                     f"./build/Examples/UnavailabilityTest --cluster={','.join(servers)} "
                     f"--size={options.size} --timeout={3 * LEASE_TIMEOUT_MS}ms "
                     f"--writesPerMs={options.writes_per_ms} --readsPerMs={options.reads_per_ms} "
-                    f"--out=unavailability_result.txt"
-                )
-            except subprocess.CalledProcessError as e:
+                    f"--out=unavailability_result.txt")
+                if args.valgrind:
+                    unavailability_test_cmd = f"valgrind {unavailability_test_cmd}"
+                run_command(unavailability_test_cmd, timeout=30)
+            except Exception as e:
                 # Probably serverId 3 didn't become leader. Retry.
                 print(f"RETRY: UnavailabilityTest failed: {e}")
                 continue
@@ -230,6 +234,11 @@ if __name__ == "__main__":
         action="append",
         choices=option_names,
         help="Which benchmark configs to enable",
+    )
+    parser.add_argument(
+        "--valgrind",
+        action="store_true",
+        help="Run UnavailabilityTest under Valgrind",
     )
     args = parser.parse_args()
     SERVERS = args.servers.split(",")

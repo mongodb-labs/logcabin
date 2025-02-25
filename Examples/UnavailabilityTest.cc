@@ -295,16 +295,18 @@ int main(int argc, char **argv)
         std::string value(options.size, 'v');
 
         uint64_t now = timeNanos();
+        uint64_t nextLogTimeNanos = now + 2000000000; // 2 seconds
         uint64_t nextReadTimeNanos = now;
         uint64_t nextWriteTimeNanos = now;
         uint64_t whenToStopNanos = now + options.timeoutNanos;
         std::mutex resultsMutex;
         std::map<OperationType, std::vector<OperationResult>> results;
+        uint64_t writesSucceeded = 0, writesFailed = 0, readsSucceeded = 0, readsFailed = 0;
 
         {
             Cluster cluster = Cluster(options.cluster);
             Tree tree = cluster.getTree();
-            tree.setTimeout(100000000UL); // 100ms
+            tree.setTimeout(100000000); // 100 ms
 
             while (timeNanos() < whenToStopNanos)
             {
@@ -316,9 +318,14 @@ int main(int argc, char **argv)
                                    {
                                        if (result.status == Status::OK)
                                        {
+                                           ++readsSucceeded;
                                            std::lock_guard<std::mutex> lock(resultsMutex);
                                            results[OperationType::READ].push_back(OperationResult(
                                                startNanos, stopNanos, stopNanos - startNanos));
+                                       }
+                                       else
+                                       {
+                                           ++readsFailed;
                                        }
                                    });
                     nextReadTimeNanos += uint64_t(1000000 / options.readsPerMs);
@@ -331,15 +338,23 @@ int main(int argc, char **argv)
                                     {
                                         if (result.status == Status::OK)
                                         {
+                                            ++writesSucceeded;
                                             std::lock_guard<std::mutex> lock(resultsMutex);
                                             results[OperationType::WRITE].push_back(OperationResult(
                                                 startNanos, stopNanos, stopNanos - startNanos));
                                         }
                                         else {
-                                            VERBOSE("Write failed: %s", result.error.c_str());
+                                            ++writesFailed;
                                         }
                                     });
                     nextWriteTimeNanos += uint64_t(1000000 / options.writesPerMs);
+                }
+
+                if (now >= nextLogTimeNanos)
+                {
+                    nextLogTimeNanos += 2000000000;
+                    NOTICE("writes ok: %lu\twrites failed: %lu\treads ok: %lu\treads failed: %lu",
+                           writesSucceeded, writesFailed, readsSucceeded, readsFailed);
                 }
 
                 now = timeNanos();

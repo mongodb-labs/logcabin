@@ -67,15 +67,14 @@ class BenchmarkResult:
 
 def run_command(command: str, quiet: bool = False, timeout: float = None) -> str:
     print(command)
-    return_code = 0
+    process = None
     output = io.StringIO()
 
     def target():
-        nonlocal return_code
+        nonlocal process
 
         process = subprocess.Popen(
-            command,
-            shell=True,
+            command.split(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
@@ -88,18 +87,18 @@ def run_command(command: str, quiet: bool = False, timeout: float = None) -> str
                 output.write(line)
         finally:
             process.wait()
-            return_code = process.returncode
 
     thread = threading.Thread(target=target)
     thread.start()
     thread.join(timeout)
+
     if thread.is_alive():
-        subprocess.call(["pkill", "-f", command])
+        subprocess.call(["kill", str(process.pid)])
         thread.join()
         raise Exception(f"Command '{command}' timed out after {timeout} seconds")
 
-    if return_code != 0:
-        raise subprocess.CalledProcessError(return_code, command)
+    if process.returncode != 0:
+        raise subprocess.CalledProcessError(process.returncode, command)
 
     return output.getvalue()
 
