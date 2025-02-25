@@ -236,6 +236,8 @@ ClientSession::Timer::handleTimerEvent()
             {
                 callbacks.push_back(std::move(response->callback));
             }
+            
+            session.responses.clear();
             mutexGuard.unlock();
             for (const auto &callback : callbacks)
             {
@@ -402,12 +404,27 @@ ClientSession::makeErrorSession(Event::Loop& eventLoop,
 
 ClientSession::~ClientSession()
 {
+    if (messageSocket) {
+        messageSocket->receiveSocketMonitor.disableForever();
+        messageSocket->sendSocketMonitor.disableForever();
+    }
     timerMonitor.disableForever();
     messageSocket.reset();
+    std::vector<Callback> callbacks;
+    // Copy the callbacks in case executing one of them changes 'responses'.
     for (auto it = responses.begin(); it != responses.end(); ++it)
     {
-        it->second->execCallback();
+        Response *response = it->second;
+        if (response->callback)
+        {
+            callbacks.push_back(std::move(response->callback));
+        }
         delete it->second;
+    }
+
+    for (const auto &callback : callbacks)
+    {
+        callback();
     }
 }
 

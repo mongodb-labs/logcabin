@@ -127,6 +127,7 @@ void LeaderRPC::Call::start(OpCode opCode, const google::protobuf::Message &requ
                     {
                         leaderRPC.reportNotLeader(cachedSession);
                     }
+                    leaderRpcStatus = Call::Status::TIMEOUT;
                     break;
                 default:
                     PANIC("Unknown error code %u in service-specific "
@@ -136,12 +137,15 @@ void LeaderRPC::Call::start(OpCode opCode, const google::protobuf::Message &requ
             }
             break;
             case RPCS::RPC_FAILED:
+                leaderRpcStatus = Call::Status::TIMEOUT;
                 leaderRPC.reportFailure(cachedSession);
                 break;
             case RPCS::RPC_CANCELED:
+                leaderRpcStatus = Call::Status::TIMEOUT; // TODO: report failure?
                 break;
             case RPCS::TIMEOUT:
                 leaderRpcStatus = Call::Status::TIMEOUT;
+                leaderRPC.reportFailure(cachedSession);
                 break;
             case RPCS::INVALID_SERVICE:
                 PANIC("The server isn't running the ClientService");
@@ -276,10 +280,9 @@ void LeaderRPC::asyncCall(OpCode opCode, const google::protobuf::Message &reques
     // Capture the Call in the std::move(callback) to prevent its deletion.
     auto call = std::make_shared<Call>(*this);
     call->start(opCode, request, timeout,
-                [call, callback](Call::Status callStatus, uint64_t startNanos,
-                                                       uint64_t stopNanos)
+                [call, callback](Call::Status callStatus, uint64_t startNanos, uint64_t stopNanos)
                 {
-                    Status leaderRPCStatus;
+                    Status leaderRPCStatus = Status::OK;
                     switch (callStatus)
                     {
                     case Call::Status::OK:
@@ -359,7 +362,7 @@ LeaderRPC::getSession(TimePoint timeout)
             usedHint = false;
         } else {
             address.refresh(timeout);
-            VERBOSE("Connecting to: %s", address.toString().c_str());
+            NOTICE("Connecting to: %s", address.toString().c_str());
             session = sessionManager.createSession(
                     address,
                     timeout,

@@ -106,6 +106,8 @@ class File {
          */
         Event::Loop& eventLoop;
 
+        File* file; // TODO: expose a public API
+        
       private:
         /**
          * Protects #file from concurrent access/modification.
@@ -116,7 +118,7 @@ class File {
          * Pointer to file being monitored, or NULL if disableForever() has
          * been called.
          */
-        File* file;
+        // File* file;
 
         // Monitor is not copyable.
         Monitor(const Monitor&) = delete;

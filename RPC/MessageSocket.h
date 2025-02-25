@@ -354,6 +354,8 @@ class MessageSocket {
     // MessageSocket is non-copyable.
     MessageSocket(const MessageSocket&) = delete;
     MessageSocket& operator=(const MessageSocket&) = delete;
+    
+    friend class ClientSession;
 
 }; // class MessageSocket
 

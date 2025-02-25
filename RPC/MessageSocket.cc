@@ -227,11 +227,15 @@ MessageSocket::sendMessage(MessageId messageId, Core::Buffer contents)
 void
 MessageSocket::disconnect()
 {
+    // (ajdavis) Handler is owned by the same ClientSession that owns me, but it could be destroyed
+    // after I'm disconnected once. Avoid calling into handler after first disconnect.
+    bool alreadyDisabled = receiveSocketMonitor.file == NULL;
     receiveSocketMonitor.disableForever();
     sendSocketMonitor.disableForever();
     // TODO(ongaro): to make it safe for epoll_wait to return multiple events,
     // need to somehow queue the handleDisconnect for later.
-    handler.handleDisconnect();
+    if (!alreadyDisabled)
+        handler.handleDisconnect();
 }
 
 void
@@ -320,7 +324,10 @@ MessageSocket::read(void* buf, size_t maxBytes)
     }
     if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
         return 0;
-    PANIC("Error while reading from socket: %s", strerror(errno));
+    
+    // EBADF and others arise from Jesse's async rewrite.
+    WARNING("Error while reading from socket fd %u: %s", receiveSocket.fd, strerror(errno));
+    return -1;
 }
 
 void

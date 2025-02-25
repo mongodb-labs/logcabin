@@ -16,3 +16,4 @@ read_result.txt
 write_result.txt
 unavailability_result.txt
 unavailability_experiment-*.csv
+core.*
