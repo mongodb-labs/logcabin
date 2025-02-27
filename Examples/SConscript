@@ -7,6 +7,10 @@ env.Default([
                 ["Benchmark.cc", "#build/liblogcabin.a"],
                 LIBS = libs),
 
+    env.Program("NetworkLatencyTest",
+                ["NetworkLatencyTest.cc", "#build/liblogcabin.a"],
+                LIBS = libs),
+
     env.Program("FailoverTest",
                 ["FailoverTest.cc", "#build/liblogcabin.a"],
                 LIBS = libs),

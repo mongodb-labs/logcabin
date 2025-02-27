@@ -59,6 +59,7 @@ class BenchmarkOptions:
 
 @dataclass
 class BenchmarkResult:
+    operationType: str
     opsPerSec: float
     p50latencyNanos: float
     p90latencyNanos: float

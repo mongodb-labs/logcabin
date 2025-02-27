@@ -23,7 +23,7 @@ parser.add_argument(
     "--servers", type=str, required=True, help="Comma-separated list of addresses"
 )
 parser.add_argument(
-    "--trials", type=int, default=5, help="Number of trials for each config"
+    "--trials", type=int, default=1, help="Number of trials for each config"
 )
 args = parser.parse_args()
 SERVERS = args.servers.split(",")
@@ -110,12 +110,15 @@ def run_benchmark(options: LatencyBenchmarkOptions, stats: Stats):
 
     title("RECONFIGURE")
     run_command(
-        f"./build/Examples/Reconfigure --cluster={SERVERS[0]} set {' '.join(SERVERS)}"
+        f"./build/Examples/Reconfigure --cluster={SERVERS[0]} set {' '.join(SERVERS)}",
+        timeout=30,
     )
 
     title("HELLOWORLD")
-    run_command(f"./build/Examples/HelloWorld --cluster={','.join(SERVERS)}")
-
+    run_command(
+        f"./build/Examples/HelloWorld --cluster={','.join(SERVERS)}", timeout=30
+    )
+    # import sys; sys.exit(0)
     for server_id, addr in enumerate(SERVERS, start=1):
         title(f"CONFIG NETWORK {addr}")
         run_ssh_command(
@@ -128,44 +131,39 @@ def run_benchmark(options: LatencyBenchmarkOptions, stats: Stats):
         """,
         )
 
-    title("CREATE DATA")
-    # The operation type is "write" to create some data. The real benchmark's operation is "read".
-    run_command(
-        f"./build/Examples/Benchmark --cluster={','.join(SERVERS)} "
-        f"--size={options.size} --threads={options.threads} --operation-type=write "
-        f"--timeout=30s --operations={options.threads}"
-    )
-
-    title("BENCHMARK")
-    run_command(
-        f"./build/Examples/Benchmark --cluster={','.join(SERVERS)} "
-        f"--size={options.size} --threads={options.threads} --operation-type=read "
-        f"--timeout=30s --operations={options.operations} --resultsFile=one_result.txt"
-    )
-
-    title("CLEANUP")
-    for addr in SERVERS:
-        run_ssh_command(
-            addr,
-            f"""
-        sudo killall -q -9 perf LogCabin Reconfigure || true
-        sudo tc qdisc del dev ens5 root || true
-        sudo iptables -t mangle -F || true""",
+    title("EXPERIMENT")
+    try:
+        run_command(
+            f"./build/Examples/NetworkLatencyTest --cluster={','.join(SERVERS)} "
+            f"--size={options.size} "
+            f"--timeout=30s --operations={options.operations} --resultsFile=one_result.txt",
+            timeout=90,
         )
-
-    reader = csv.DictReader(open("one_result.txt"))
-    row = next(reader)
-    stats.append(
-        options=options,
-        result=BenchmarkResult(
-            opsPerSec=float(row["opsPerSec"]),
-            p50latencyNanos=float(row["p50latencyNanos"]),
-            p90latencyNanos=float(row["p90latencyNanos"]),
-            p95latencyNanos=float(row["p95latencyNanos"]),
+    finally:
+        title("CLEANUP")
+        for addr in SERVERS:
+            run_ssh_command(
+                addr,
+                f"""
+            sudo killall -q -9 perf LogCabin Reconfigure || true
+            sudo tc qdisc del dev ens5 root || true
+            sudo iptables -t mangle -F || true""",
+            )
+            
+    for row in csv.DictReader(open("one_result.txt")):
+        stats.append(
+            options=options,
+            result=BenchmarkResult(
+                operationType=row["operationType"],
+                opsPerSec=float(row["opsPerSec"]),
+                p50latencyNanos=float(row["p50latencyNanos"]),
+                p90latencyNanos=float(row["p90latencyNanos"]),
+                p95latencyNanos=float(row["p95latencyNanos"]),
+            ),
         )
-    )
 
     stats.save()
+    time.sleep(30)  # Might help with port reuse issues?
 
 
 if __name__ == "__main__":
@@ -190,4 +188,10 @@ if __name__ == "__main__":
             n_needed = max(0, args.trials - n_already)
             print(f"{n_needed} trials for {options}")
             for _ in range(n_needed):
-                run_benchmark(options, stats)
+                while True:
+                    try:
+                        run_benchmark(options, stats)
+                        break
+                    except Exception as e:
+                        print(e)
+                        print("RETRYING")

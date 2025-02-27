@@ -21,8 +21,8 @@ def chart_network_latency():
     LAT_RANGE = csv["latencyMs"].max() - csv["latencyMs"].min()
     LAT_CARDINALITY = csv["latencyMs"].unique().size
     LAT_INTERVAL = LAT_RANGE / (LAT_CARDINALITY - 1)
-    # Room for 3 bars for each configuration plus some padding.
-    BARWIDTH = LAT_INTERVAL / 5
+    # Room for 6 bars for each configuration plus some padding.
+    BARWIDTH = LAT_INTERVAL / 7
     fig, ax = plt.subplots(figsize=(5, 3))
     ax.set(xlabel="added one-way network latency (ms)")
     ax.tick_params(axis="x", bottom=False)
@@ -39,12 +39,15 @@ def chart_network_latency():
 
     # x-offset, color, config_name
     combos = [
-        (-1.5, "C0", "inconsistent"),
-        (0, "C0", "lease"),
-        (1.5, "C0", "quorum"),
+        (-2.4, "C1", "inconsistent", "write"),
+        (-1.4, "C0", "inconsistent", "read"),
+        (0, "C1", "lease", "write"),
+        (1, "C0", "lease", "read"),
+        (2.4, "C1", "quorum", "write"),
+        (3.4, "C0", "quorum", "read"),
     ]
 
-    for offset, color, config_name in combos:
+    for offset, color, config_name, operationType in combos:
         if config_name == "inconsistent":
             config_predicate = (csv["quorumCheckOnRead"] == False) & (
                 csv["leaseEnabled"] == False
@@ -58,12 +61,14 @@ def chart_network_latency():
                 & (csv["inheritLeaseEnabled"])
             )
 
+        op_predicate = csv["operationType"] == operationType
         column = "p95latencyNanos"
         df = (
-            csv[config_predicate]
+            csv[config_predicate & op_predicate]
             .groupby(
                 [
                     "latencyMs",
+                    "operationType",
                     "quorumCheckOnRead",
                     "leaseEnabled",
                     "deferCommitEnabled",
@@ -89,17 +94,17 @@ def chart_network_latency():
     fig.legend(
         loc="upper center",
         ncol=2,
-        handles=[Patch(color="C0")],
+        handles=[Patch(color=color) for color in ["C1", "C0"]],
         handleheight=0.65,
         handlelength=0.65,
-        labels=["read latency p95"],
+        labels=["write latency p90", "read latency p90"],
         frameon=False,
     )
     arrow_x = csv["latencyMs"].min()
     arrow_y = csv[csv["latencyMs"] == 0][column].max() / 1_000_000
 
-    for i in range(len(combos)):
-        offset, color, config_name = combos[i]
+    for i in range(0, len(combos), 2):
+        offset, color, config_name, operationType = combos[i]
         ax.text(
             arrow_x + 1.15 * offset * BARWIDTH,
             arrow_y + 0.2,
@@ -264,8 +269,13 @@ def chart_unavailability():
 
 
 if __name__ == "__main__":
+    chart_funcs = {
+        "network_latency": chart_network_latency,
+        "unavailability": chart_unavailability,
+    }
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("charts", nargs="*", help="Which charts to make")
+    parser.add_argument("charts", nargs="*", help=f"Which charts to make: {','.join(chart_funcs)}")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -276,11 +286,6 @@ if __name__ == "__main__":
     font_manager.fontManager.addfont(font_path)
     font_properties = font_manager.FontProperties(fname=font_path)
     plt.rcParams["font.family"] = font_properties.get_name()
-
-    chart_funcs = {
-        "network_latency": chart_network_latency,
-        "unavailability": chart_unavailability,
-    }
 
     for chart_name, chart_func in chart_funcs.items():
         if chart_name in args.charts or args.charts == []:
