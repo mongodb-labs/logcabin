@@ -22,7 +22,7 @@ def chart_network_latency():
     LAT_CARDINALITY = csv["latencyMs"].unique().size
     LAT_INTERVAL = LAT_RANGE / (LAT_CARDINALITY - 1)
     # Room for 6 bars for each configuration plus some padding.
-    BARWIDTH = LAT_INTERVAL / 7
+    BARWIDTH = LAT_INTERVAL / 8
     fig, ax = plt.subplots(figsize=(5, 3))
     ax.set(xlabel="added one-way network latency (ms)")
     ax.tick_params(axis="x", bottom=False)
@@ -34,17 +34,19 @@ def chart_network_latency():
         return f"{int(y)}"
 
     ax.yaxis.set_major_formatter(plt.FuncFormatter(format_func))
-    ax.yaxis.set_major_locator(plt.LogLocator(base=4))
+    ax.yaxis.set_major_locator(plt.LogLocator(base=10))
     ax.yaxis.set_minor_locator(plt.NullLocator())  # Remove minor ticks
+    
+    ax.xaxis.set_major_locator(plt.MultipleLocator(1))
 
     # x-offset, color, config_name
     combos = [
-        (-2.4, "C1", "inconsistent", "write"),
-        (-1.4, "C0", "inconsistent", "read"),
-        (0, "C1", "lease", "write"),
-        (1, "C0", "lease", "read"),
-        (2.4, "C1", "quorum", "write"),
-        (3.4, "C0", "quorum", "read"),
+        (-2.5, "C1", "inconsistent", "write"),
+        (-1.5, "C0", "inconsistent", "read"),
+        (-0.5, "C1", "lease", "write"),
+        (0.5, "C0", "lease", "read"),
+        (1.5, "C1", "quorum", "write"),
+        (2.5, "C0", "quorum", "read"),
     ]
 
     for offset, color, config_name, operationType in combos:
@@ -106,12 +108,13 @@ def chart_network_latency():
     for i in range(0, len(combos), 2):
         offset, color, config_name, operationType = combos[i]
         ax.text(
-            arrow_x + 1.15 * offset * BARWIDTH,
+            arrow_x + 0.1 + 1.3 * offset * BARWIDTH,
             arrow_y + 0.2,
             rf"$\leftarrow$ {config_name}",
             horizontalalignment="center",
             verticalalignment="bottom",
             rotation="vertical",
+            fontdict={"fontsize": 10},
         )
 
     fig.text(0.002, 0.55, "milliseconds (log scale)", va="center", rotation="vertical")
