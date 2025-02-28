@@ -103,7 +103,7 @@ def chart_network_latency():
         frameon=False,
     )
     arrow_x = csv["latencyMs"].min()
-    arrow_y = csv[csv["latencyMs"] == 0][column].max() / 1_000_000
+    arrow_y = csv[csv["latencyMs"] == 1][column].max() / 1_000_000
 
     for i in range(0, len(combos), 2):
         offset, color, config_name, operationType = combos[i]
@@ -114,7 +114,7 @@ def chart_network_latency():
             horizontalalignment="center",
             verticalalignment="bottom",
             rotation="vertical",
-            fontdict={"fontsize": 10},
+            fontdict={"fontsize": 11},
         )
 
     fig.text(0.002, 0.55, "milliseconds (log scale)", va="center", rotation="vertical")
