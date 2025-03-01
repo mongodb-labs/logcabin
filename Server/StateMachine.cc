@@ -567,6 +567,9 @@ StateMachine::applyThreadMain()
                     lockGuard.unlock();
                     if (ok)
                     {
+                        if (entry.index == 1000){
+                        NOTICE("reply to client %lu RPC %lu index %lu",
+                               rpcInfo.client_id(), rpcInfo.rpc_number(), entry.index);}
                         entry.request.rpc.reply(response);
                     }
                     else

@@ -160,6 +160,8 @@ LocalServer::updatePeerStats(Protocol::ServerStats::Raft::Peer& peerStats,
 
 ////////// Peer //////////
 
+const uint64_t PEER_THREAD_MAX = 1;
+
 Peer::Peer(uint64_t serverId, RaftConsensus& consensus)
     : Server(serverId)
     , consensus(consensus)
@@ -190,7 +192,7 @@ Peer::Peer(uint64_t serverId, RaftConsensus& consensus)
     , rpcs()
     , threads()
 {
-    for (uint64_t i = 0; i < 4; ++i)
+    for (uint64_t i = 0; i < PEER_THREAD_MAX; ++i)
         rpcs.emplace_back();
 }
 
@@ -323,7 +325,7 @@ Peer::startThread(std::shared_ptr<Peer> self)
 {
     thisCatchUpIterationStart = Clock::now();
     thisCatchUpIterationGoalId = consensus.log->getLastLogIndex();
-    for (uint64_t i = 0; i < 4; ++i) {
+    for (uint64_t i = 0; i < PEER_THREAD_MAX; ++i) {
         ++consensus.numPeerThreads;
         threads.emplace_back(&RaftConsensus::peerThreadMain, &consensus, self, i);
         threads.back().detach();
@@ -2510,9 +2512,11 @@ RaftConsensus::appendEntries(std::unique_lock<Mutex>& lockGuard,
             if (peer.matchIndex > prevLogIndex + numEntries) {
                 // Revisit this warning if we pipeline AppendEntries RPCs for
                 // performance.
-                // WARNING("matchIndex should monotonically increase within a "
-                //         "term, since servers don't forget entries. But it "
-                //         "didn't.");
+                WARNING("matchIndex should monotonically increase within a "
+                        "term, since servers don't forget entries. But it "
+                        "didn't. peer %lu, prevLogIndex %lu, numEntries %lu, "
+                        "matchIndex %lu",
+                        peer.serverId, prevLogIndex, numEntries, peer.matchIndex);
             } else {
                 peer.matchIndex = prevLogIndex + numEntries;
                 advanceCommitIndex();

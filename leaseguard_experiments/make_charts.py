@@ -39,7 +39,7 @@ def chart_network_latency():
     
     ax.xaxis.set_major_locator(plt.MultipleLocator(1))
 
-    # x-offset, color, config_name
+    # x-offset, color, config_name, operation_type
     combos = [
         (-2.5, "C1", "inconsistent", "write"),
         (-1.5, "C0", "inconsistent", "read"),
