@@ -5,11 +5,9 @@ import fractions
 
 import matplotlib.font_manager as font_manager
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 import pandas as pd
-from matplotlib.patches import Patch
-
-from lib import BenchmarkOptions
 
 
 _logger = logging.getLogger("chart")
@@ -18,38 +16,33 @@ _this_dir = os.path.dirname(__file__)
 
 def chart_network_latency():
     csv = pd.read_csv(f"{_this_dir}/network_latency_experiment.csv")
-    LAT_RANGE = csv["latencyMs"].max() - csv["latencyMs"].min()
-    LAT_CARDINALITY = csv["latencyMs"].unique().size
-    LAT_INTERVAL = LAT_RANGE / (LAT_CARDINALITY - 1)
-    # Room for 6 bars for each configuration plus some padding.
-    BARWIDTH = LAT_INTERVAL / 8
-    fig, ax = plt.subplots(figsize=(5, 3))
-    ax.set(xlabel="added one-way network latency (ms)")
-    ax.tick_params(axis="x", bottom=False)
-    ax.set_yscale("log")  # Set y-axis to logarithmic scale
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True, figsize=(5, 4))
 
-    def format_func(y, _):
-        if y < 1:
-            return str(fractions.Fraction(y).limit_denominator())
-        return f"{int(y)}"
+    ax3.set(xlabel="added one-way network latency (ms)")
 
-    ax.yaxis.set_major_formatter(plt.FuncFormatter(format_func))
-    ax.yaxis.set_major_locator(plt.LogLocator(base=10))
-    ax.yaxis.set_minor_locator(plt.NullLocator())  # Remove minor ticks
-    
-    ax.xaxis.set_major_locator(plt.MultipleLocator(1))
+    ax1.yaxis.set_major_locator(plt.MaxNLocator(nbins=3))
+    ax2.yaxis.set_major_locator(plt.MaxNLocator(nbins=3))
+    ax3.yaxis.set_major_locator(plt.MaxNLocator(nbins=3))
 
-    # x-offset, color, config_name, operation_type
+    ax1.xaxis.set_major_locator(plt.NullLocator())
+    ax2.xaxis.set_major_locator(plt.NullLocator())
+    ax3.xaxis.set_major_locator(plt.MultipleLocator(1))
+
+    for ax in [ax1, ax2, ax3]:
+        ax.yaxis.grid(True, which='both', linestyle='--', linewidth=0.5)
+        ax.set_axisbelow(True)
+
+    # x-offset, color, config_name, operation_type, axes
     combos = [
-        (-2.5, "C1", "inconsistent", "write"),
-        (-1.5, "C0", "inconsistent", "read"),
-        (-0.5, "C1", "lease", "write"),
-        (0.5, "C0", "lease", "read"),
-        (1.5, "C1", "quorum", "write"),
-        (2.5, "C0", "quorum", "read"),
+        (-0.25, "C1", "inconsistent", "write", ax1),
+        (0.25, "C0", "inconsistent", "read", ax1),
+        (-0.25, "C1", "lease", "write", ax2),
+        (0.25, "C0", "lease", "read", ax2),
+        (-0.25, "C1", "quorum", "write", ax3),
+        (0.25, "C0", "quorum", "read", ax3),
     ]
 
-    for offset, color, config_name, operationType in combos:
+    for offset, color, config_name, operationType, ax in combos:
         if config_name == "inconsistent":
             config_predicate = (csv["quorumCheckOnRead"] == False) & (
                 csv["leaseEnabled"] == False
@@ -84,44 +77,68 @@ def chart_network_latency():
             .reset_index()
         )
 
+        hatch = "//" if operationType == "write" else "xx"
+
         # The x-axis "latencyMs" is the artificially added network latency.
+        x = df["latencyMs"] + offset
+        # convert nanos to millis and ensure min height of 1
+        y = df[column].apply(lambda x: max(x / 1_000_000, 1))
+        # Draw hatch only.
         ax.bar(
-            df["latencyMs"] + offset * BARWIDTH,
-            df[column] / 1_000_000,  # convert nanos to millis
-            BARWIDTH,
-            label=column,
-            color=color,
+            x,
+            y,
+            label=f"{config_name} {operationType}",
+            color="none",
+            width=0.3,
+            edgecolor=color,
+            hatch=hatch,
+            facecolor="none",
+            linewidth=0.5,
+            zorder=2,
+        )
+        # Draw the edge.
+        ax.bar(
+            x,
+            y,
+            color="none",
+            width=0.3,
+            edgecolor="black",
+            facecolor="none",
+            linewidth=0.5,
+            zorder=3,
         )
 
+    # Draw hatch only.
     fig.legend(
         loc="upper center",
         ncol=2,
-        handles=[Patch(color=color) for color in ["C1", "C0"]],
-        handleheight=0.65,
-        handlelength=0.65,
-        labels=["write latency p90", "read latency p90"],
+        handles=[
+            Patch(
+                facecolor="none", edgecolor="C1", label="write latency", hatch="//", linewidth=0.5
+            ),
+            Patch(
+                facecolor="none", edgecolor="C0", label="read latency", hatch="xx", linewidth=0.5
+            ),
+        ],
         frameon=False,
     )
-    arrow_x = csv["latencyMs"].min()
-    arrow_y = csv[csv["latencyMs"] == 1][column].max() / 1_000_000
-
-    for i in range(0, len(combos), 2):
-        offset, color, config_name, operationType = combos[i]
-        ax.text(
-            arrow_x + 0.1 + 1.3 * offset * BARWIDTH,
-            arrow_y + 0.2,
-            rf"$\leftarrow$ {config_name}",
-            horizontalalignment="center",
-            verticalalignment="bottom",
-            rotation="vertical",
-            fontdict={"fontsize": 11},
-        )
-
-    fig.text(0.002, 0.55, "milliseconds (log scale)", va="center", rotation="vertical")
-
-    # Remove chart borders
-    for spine in ax.spines.values():
-        spine.set_visible(False)
+    # Draw edges.
+    fig.legend(
+        loc="upper center",
+        ncol=2,
+        handles=[
+            Patch(
+                facecolor="none", edgecolor="black", label="write latency", linewidth=0.5
+            ),
+            Patch(
+                facecolor="none", edgecolor="black", label="read latency", linewidth=0.5
+            ),
+        ],
+        frameon=False,
+        labelcolor="none",
+    )
+    
+    fig.text(0.002, 0.5, "milliseconds", va="center", rotation="vertical")
 
     fig.tight_layout()
     fig.subplots_adjust(top=0.9)
@@ -283,6 +300,7 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
     plt.rcParams.update({"font.size": 12})
+    plt.rcParams["hatch.linewidth"] = 0.5
     font_path = (
         f"{_this_dir}/cmunrm.ttf"  # Computer Modern Roman, like Latex's default.
     )
