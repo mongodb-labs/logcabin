@@ -107,6 +107,14 @@ def chart_network_latency():
             linewidth=0.5,
             zorder=3,
         )
+        # Add config_name to the upper left interior of each subplot
+        ax.text(
+            0.02, 0.7, config_name,
+            transform=ax.transAxes,
+            verticalalignment='top',
+            horizontalalignment='left',
+            fontsize=12,
+        )
 
     # Draw hatch only.
     fig.legend(
