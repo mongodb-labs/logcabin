@@ -197,7 +197,7 @@ def chart_unavailability():
         )
         # Cut off the first and last data.
         start_time = df_resampled["time_bin"].min() + 20 * interval
-        end_time = start_time + 3 * LEASE_TIMEOUT_MS * 1_000_000
+        end_time = start_time + 2 * LEASE_TIMEOUT_MS * 1_000_000
         df_resampled = df_resampled[
             (df_resampled["time_bin"] >= start_time)
             & (df_resampled["time_bin"] <= end_time)
@@ -254,32 +254,22 @@ def chart_unavailability():
             transform=ax.transAxes,
         )
 
-    label_y_top = OPTIONS["inconsistent"].reads_per_ms * 2
     label_font_size = 10
-    axes[0].text(
-        KILL_LEADER_TIME_MS + 50,
-        int(label_y_top) * 0.925,
-        r"$\leftarrow$ leader crash",
-        color="red",
-        bbox=dict(facecolor="white", edgecolor="none"),
-        fontsize=label_font_size,
-    )
-    axes[0].text(
-        KILL_LEADER_TIME_MS + ELECTION_TIMEOUT_MS + 50,
-        int(label_y_top * 0.7),
-        r"$\leftarrow$ new leader elected",
-        color="green",
-        fontsize=label_font_size,
-    )
-    axes[2].text(
-        KILL_LEADER_TIME_MS + LEASE_TIMEOUT_MS - 50,
-        int(label_y_top * 0.75),
-        r"old lease expires $\rightarrow$",
-        color="purple",
-        bbox=dict(facecolor="white", edgecolor="none"),
-        horizontalalignment="right",
-        fontsize=label_font_size,
-    )
+    axes[0].text(510,
+                 17,
+                 "$\\leftarrow$ leader\n    crash",
+                 color="red",
+                 fontsize=label_font_size)
+    axes[1].text(570,
+                 1.7,  # the "quorum" chart's y-axis is short
+                 "new leader\nelected    $\\rightarrow$",
+                 color="green",
+                 fontsize=label_font_size)
+    axes[2].text(1090,
+                 17,
+                 "old lease\nexpires  $\\rightarrow$ ",
+                 color="purple",
+                 fontsize=label_font_size)
     fig.legend(
         loc="upper center",
         bbox_to_anchor=(0.5, 1.005),
