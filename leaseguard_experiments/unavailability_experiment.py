@@ -92,7 +92,7 @@ def kill_leader(when: float, servers: list[str]):
             client.connect(
                 hostname=s,
                 username="ubuntu",
-                key_filename="/home/ubuntu/.ssh/jesse-2024.pem",
+                key_filename="/home/ubuntu/.ssh/XXX-2024.pem",
             )
             session = client.get_transport().open_session()
             sleep_duration = when - time.time()

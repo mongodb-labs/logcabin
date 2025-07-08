@@ -112,7 +112,7 @@ def run_ssh_command(host, command):
         client.connect(
             hostname=host,
             username="ubuntu",
-            key_filename="/home/ubuntu/.ssh/jesse-2024.pem",
+            key_filename="/home/ubuntu/.ssh/XXX-2024.pem",
         )
         # set -e to stop on error
         _, stdout, stderr = client.exec_command(f"set -e\n{command}")
