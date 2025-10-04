@@ -1,13 +1,13 @@
 import argparse
 import logging
 import os.path
-import fractions
 
 import matplotlib.font_manager as font_manager
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 import pandas as pd
+import matplotlib.ticker as ticker
 
 
 _logger = logging.getLogger("chart")
@@ -22,12 +22,18 @@ def chart_network_latency():
 
     ax1.yaxis.set_major_locator(plt.MaxNLocator(nbins=3))
     ax2.yaxis.set_major_locator(plt.MaxNLocator(nbins=3))
+    ax2.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: f'{int(x/1000)}k'))
     ax3.yaxis.set_major_locator(plt.MaxNLocator(nbins=3))
 
     ax1.xaxis.set_major_locator(plt.NullLocator())
     ax2.xaxis.set_major_locator(plt.NullLocator())
     ax3.xaxis.set_major_locator(plt.MultipleLocator(1))
 
+    ax1.set_ylim(0, 24)
+    ax3.set_ylim(0, 24)
+    ax1.yaxis.set_major_locator(plt.MultipleLocator(10))
+    ax3.yaxis.set_major_locator(plt.MultipleLocator(10))
+    
     for ax in [ax1, ax2, ax3]:
         ax.yaxis.grid(True, which='both', linestyle='--', linewidth=0.5)
         ax.set_axisbelow(True)
@@ -36,10 +42,10 @@ def chart_network_latency():
     combos = [
         (-0.25, "C1", "inconsistent", "write", ax1),
         (0.25, "C0", "inconsistent", "read", ax1),
-        (-0.25, "C1", "lease", "write", ax2),
-        (0.25, "C0", "lease", "read", ax2),
-        (-0.25, "C1", "quorum", "write", ax3),
-        (0.25, "C0", "quorum", "read", ax3),
+        (-0.25, "C1", "quorum", "write", ax2),
+        (0.25, "C0", "quorum", "read", ax2),
+        (-0.25, "C1", "lease", "write", ax3),
+        (0.25, "C0", "lease", "read", ax3),
     ]
 
     for offset, color, config_name, operationType, ax in combos:
@@ -57,7 +63,7 @@ def chart_network_latency():
             )
 
         op_predicate = csv["operationType"] == operationType
-        column = "p95latencyNanos"
+        column = "p90latencyNanos"
         df = (
             csv[config_predicate & op_predicate]
             .groupby(
@@ -122,10 +128,18 @@ def chart_network_latency():
         ncol=2,
         handles=[
             Patch(
-                facecolor="none", edgecolor="C1", label="write latency", hatch="//", linewidth=0.5
+                facecolor="none",
+                edgecolor="C1",
+                label="write latency p90",
+                hatch="//",
+                linewidth=0.5,
             ),
             Patch(
-                facecolor="none", edgecolor="C0", label="read latency", hatch="xx", linewidth=0.5
+                facecolor="none",
+                edgecolor="C0",
+                label="read latency p90",
+                hatch="xx",
+                linewidth=0.5,
             ),
         ],
         frameon=False,
@@ -136,21 +150,25 @@ def chart_network_latency():
         ncol=2,
         handles=[
             Patch(
-                facecolor="none", edgecolor="black", label="write latency", linewidth=0.5
+                facecolor="none",
+                edgecolor="black",
+                label="write latency p90",
+                linewidth=0.5,
             ),
             Patch(
-                facecolor="none", edgecolor="black", label="read latency", linewidth=0.5
+                facecolor="none",
+                edgecolor="black",
+                label="read latency p90",
+                linewidth=0.5,
             ),
         ],
         frameon=False,
         labelcolor="none",
     )
-    
-    fig.text(0.002, 0.5, "milliseconds", va="center", rotation="vertical")
 
     fig.tight_layout()
     fig.subplots_adjust(top=0.9)
-    chart_path = f"{_this_dir}/network_latency_experiment.pdf"
+    chart_path = f"{_this_dir}/network_latency_experiment_logcabin.pdf"
     fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
     _logger.info(f"Created {chart_path}")
 
@@ -281,7 +299,7 @@ def chart_unavailability():
     fig.text(0.002, 0.5, "operations per millisecond", va="center", rotation="vertical")
     fig.tight_layout()
     fig.subplots_adjust(hspace=0.4, top=0.92)
-    chart_path = f"{_this_dir}/unavailability_experiment.pdf"
+    chart_path = f"{_this_dir}/unavailability_experiment_logcabin.pdf"
     fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
     _logger.info(f"Created {chart_path}")
 
