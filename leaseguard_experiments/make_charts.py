@@ -51,13 +51,13 @@ def chart_network_latency():
     for offset, color, config_name, operationType, ax in combos:
         if config_name == "inconsistent":
             config_predicate = (csv["quorumCheckOnRead"] == False) & (
-                csv["leaseEnabled"] == False
+                csv["leaseGuardEnabled"] == False
             )
         elif config_name == "quorum":
             config_predicate = csv["quorumCheckOnRead"]
         else:
             config_predicate = (
-                (csv["leaseEnabled"])
+                (csv["leaseGuardEnabled"])
                 & (csv["deferCommitEnabled"])
                 & (csv["inheritLeaseEnabled"])
             )
@@ -71,7 +71,7 @@ def chart_network_latency():
                     "latencyMs",
                     "operationType",
                     "quorumCheckOnRead",
-                    "leaseEnabled",
+                    "leaseGuardEnabled",
                     "deferCommitEnabled",
                     "inheritLeaseEnabled",
                     "size",
@@ -184,7 +184,7 @@ def chart_unavailability():
 
     def resample_data(benchmark_index: int, options: UnavailabilityBenchmarkOptions):
         df = pd.read_csv(f"{_this_dir}/unavailability_experiment-{benchmark_index}.csv")
-        for column in ["quorumCheckOnRead", "leaseEnabled", "deferCommitEnabled"]:
+        for column in ["quorumCheckOnRead", "leaseGuardEnabled", "deferCommitEnabled"]:
             assert df[column].nunique() == 1 and df[column].iloc[0] == getattr(
                 options, column
             )
@@ -254,7 +254,7 @@ def chart_unavailability():
             color="green",
             linestyle="dotted",
         )
-        if options.leaseEnabled:
+        if options.leaseGuardEnabled:
             # Old lease expires.
             ax.axvline(
                 x=KILL_LEADER_TIME_MS + LEASE_TIMEOUT_MS,

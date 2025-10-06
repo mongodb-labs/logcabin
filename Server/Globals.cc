@@ -90,7 +90,7 @@ Globals::Globals()
     , stateMachine()
     , isPartitioned(false)
     , quorumCheckOnRead(true) // original Raft consistency mechanism
-    , leaseEnabled(false)
+    , leaseGuardEnabled(false)
     , deferCommitEnabled(false)
     , inheritLeaseEnabled(false)
     , electionTimeoutRandomizationDisabled(false)
@@ -188,7 +188,7 @@ Globals::init()
     serverStats.enable();
     
     quorumCheckOnRead = config.read<bool>("quorumCheckOnRead", true);
-    leaseEnabled = config.read<bool>("leaseEnabled", false);
+    leaseGuardEnabled = config.read<bool>("leaseGuardEnabled", false);
     deferCommitEnabled = config.read<bool>("deferCommitEnabled", false);
     inheritLeaseEnabled = config.read<bool>("inheritLeaseEnabled", false);
     electionTimeoutRandomizationDisabled =

@@ -1667,8 +1667,8 @@ RaftConsensus::handleRequestVote(
 void RaftConsensus::replicate2(const Core::Buffer &operation, ClientRequest request)
 {
     std::unique_lock<Mutex> lockGuard(mutex);
-
-    if (globals.leaseEnabled && !globals.deferCommitEnabled &&
+    
+    if (globals.leaseGuardEnabled && !globals.deferCommitEnabled &&
         leaderLeaseStart() >= TimeBounds::localNow().earliest)
     {
         NOTICE("Reject write, no lease");
@@ -3296,7 +3296,7 @@ RaftConsensus::upToDateLeader(std::unique_lock<Mutex>& lockGuard) const
 
 uint64_t RaftConsensus::leaderLeaseStart() const
 {
-    if (!globals.leaseEnabled) {
+    if (!globals.leaseGuardEnabled) {
         return 0;
     }
     

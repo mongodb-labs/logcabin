@@ -170,7 +170,7 @@ if __name__ == "__main__":
     stats = Stats()
     stats.load()
 
-    for quorumCheckOnRead, leaseEnabled, deferCommitEnabled, inheritLeaseEnabled in [
+    for quorumCheckOnRead, leaseGuardEnabled, deferCommitEnabled, inheritLeaseEnabled in [
         (False, False, False, False),
         (True, False, False, False),
         (False, True, True, True),
@@ -179,7 +179,7 @@ if __name__ == "__main__":
             options = LatencyBenchmarkOptions(
                 latencyMs=latencyMs,
                 quorumCheckOnRead=quorumCheckOnRead,
-                leaseEnabled=leaseEnabled,
+                leaseGuardEnabled=leaseGuardEnabled,
                 deferCommitEnabled=deferCommitEnabled,
                 inheritLeaseEnabled=inheritLeaseEnabled,
             )

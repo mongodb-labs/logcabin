@@ -37,7 +37,7 @@ def _make_options():
     options = {}
     for (
         quorumCheckOnRead,
-        leaseEnabled,
+        leaseGuardEnabled,
         deferCommitEnabled,
         inheritLeaseEnabled,
         writes_per_ms,
@@ -52,7 +52,7 @@ def _make_options():
     ]:
         options[name] = UnavailabilityBenchmarkOptions(
             quorumCheckOnRead=quorumCheckOnRead,
-            leaseEnabled=leaseEnabled,
+            leaseGuardEnabled=leaseGuardEnabled,
             deferCommitEnabled=deferCommitEnabled,
             inheritLeaseEnabled=inheritLeaseEnabled,
             electionTimeoutMilliseconds=ELECTION_TIMEOUT_MS,
@@ -215,7 +215,7 @@ ps aux | grep LogCabin""",
 
         df = pd.read_csv("unavailability_result.txt")
         df["quorumCheckOnRead"] = options.quorumCheckOnRead
-        df["leaseEnabled"] = options.leaseEnabled
+        df["leaseGuardEnabled"] = options.leaseGuardEnabled
         df["deferCommitEnabled"] = options.deferCommitEnabled
         df["inheritLeaseEnabled"] = options.inheritLeaseEnabled
         csv_path = f"{os.path.splitext(__file__)[0]}-{option_index}.csv"

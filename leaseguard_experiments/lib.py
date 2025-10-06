@@ -43,7 +43,7 @@ def dataclass_fieldnames(dataclass_type):
 class BenchmarkOptions:
     # camelCase for consistency with the names in LogCabin config file and C++.
     quorumCheckOnRead: bool = False
-    leaseEnabled: bool = False
+    leaseGuardEnabled: bool = False
     deferCommitEnabled: bool = False
     inheritLeaseEnabled: bool = False
     size: int = 1024
@@ -51,10 +51,10 @@ class BenchmarkOptions:
     delta: int = 500  # Milliseconds.
 
     def __post_init__(self):
-        if self.deferCommitEnabled and not self.leaseEnabled:
-            raise ValueError("deferCommitEnabled requires leaseEnabled")
-        if self.inheritLeaseEnabled and not self.leaseEnabled:
-            raise ValueError("inheritLeaseEnabled requires leaseEnabled")
+        if self.deferCommitEnabled and not self.leaseGuardEnabled:
+            raise ValueError("deferCommitEnabled requires leaseGuardEnabled")
+        if self.inheritLeaseEnabled and not self.leaseGuardEnabled:
+            raise ValueError("inheritLeaseEnabled requires leaseGuardEnabled")
 
 
 @dataclass
@@ -156,7 +156,7 @@ electionTimeoutMilliseconds = {options.electionTimeoutMilliseconds}
 electable = {bul(electable)}
 delta = {options.delta}
 quorumCheckOnRead = {bul(options.quorumCheckOnRead)}
-leaseEnabled = {bul(options.leaseEnabled)}
+leaseGuardEnabled = {bul(options.leaseGuardEnabled)}
 deferCommitEnabled = {bul(options.deferCommitEnabled)}
 inheritLeaseEnabled = {bul(options.inheritLeaseEnabled)}
 electionTimeoutRandomizationDisabled = true

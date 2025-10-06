@@ -147,7 +147,7 @@ StateMachine::query(const Query::Request& request,
         paths.push_back(request.tree().read().path());
     }
 
-    if (globals.leaseEnabled)
+    if (globals.leaseGuardEnabled)
     {
         const auto localNow = Core::Time::TimeBounds::localNow();
         const auto appliedAge = localNow.latest - lastAppliedTimeBounds.earliest;
