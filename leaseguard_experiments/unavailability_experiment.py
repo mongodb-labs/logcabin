@@ -52,14 +52,18 @@ def _make_options():
         (False, False, True, True, False, 10, 20, "defer\ncommit"),
         (False, False, True, True, True, 10, 20, "inherit\nlease"),
     ]:
+        # Test lease expiration > election timeout.
+        delta = 2 * ELECTION_TIMEOUT_MS  
+        # Ongaro-style lease requires election timeout == lease timeout.
+        e_timeout = delta if ongaroLeaseEnabled else ELECTION_TIMEOUT_MS            
         options[name] = UnavailabilityBenchmarkOptions(
             quorumCheckOnRead=quorumCheckOnRead,
             ongaroLeaseEnabled=ongaroLeaseEnabled,
             leaseGuardEnabled=leaseGuardEnabled,
             deferCommitEnabled=deferCommitEnabled,
             inheritLeaseEnabled=inheritLeaseEnabled,
-            electionTimeoutMilliseconds=ELECTION_TIMEOUT_MS,
-            delta=2 * ELECTION_TIMEOUT_MS,  # Test lease expiration > election timeout.
+            electionTimeoutMilliseconds=e_timeout,
+            delta=delta,
             writes_per_ms=writes_per_ms,
             reads_per_ms=reads_per_ms,
         )

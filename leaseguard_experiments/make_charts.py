@@ -264,7 +264,7 @@ def chart_unavailability():
             color="green",
             linestyle="dotted",
         )
-        if options.leaseGuardEnabled:
+        if options.ongaroLeaseEnabled or options.leaseGuardEnabled:
             # Old lease expires.
             ax.axvline(
                 x=KILL_LEADER_TIME_MS + LEASE_TIMEOUT_MS,
