@@ -187,6 +187,10 @@ class Server {
      */
     virtual void scheduleHeartbeat() = 0;
     /**
+     * The start time of the last successful RPC exchanged with this server.
+     */
+    virtual TimePoint getLastSuccessfulHeartbeatTime() const = 0;
+    /**
      * Write this Server's state into the given structure. Used for
      * diagnostics.
      */
@@ -265,6 +269,8 @@ class LocalServer : public Server {
      * advance the leader's commitIndex.
      */
     uint64_t lastSyncedIndex;
+    
+    TimePoint getLastSuccessfulHeartbeatTime() const { return Clock::now();}
 };
 
 /**
@@ -353,7 +359,8 @@ class Peer : public Server {
     std::ostream& dumpToStream(std::ostream& os) const;
     void updatePeerStats(Protocol::ServerStats::Raft::Peer& peerStats,
                          Core::Time::SteadyTimeConverter& time) const;
-
+                         
+    TimePoint getLastSuccessfulHeartbeatTime() const { return lastSuccessfulHeartbeatTime;}
   private:
 
     /**
@@ -423,6 +430,11 @@ class Peer : public Server {
      * See #getLastAckEpoch().
      */
     uint64_t lastAckEpoch;
+    
+    /**
+     * The start time of the last successful RPC exchanged with this server.
+     */
+    TimePoint lastSuccessfulHeartbeatTime;
 
     /**
      * When the next heartbeat should be sent to the follower.
@@ -1470,7 +1482,7 @@ class RaftConsensus {
      * Local time we can safely read and advance the commitIndex without 
      * restriction.
      */
-    uint64_t leaderLeaseStart() const;
+    TimeBounds leaseGuardTimeBounds() const;
 
     /**
      * Print out a ClientResult for debugging purposes.

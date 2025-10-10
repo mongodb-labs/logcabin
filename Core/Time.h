@@ -335,6 +335,10 @@ struct TimeBounds {
     bool empty() {
         return earliest == 0 && latest == 0;
     }
+    
+    bool contains(const TimeBounds &other) const {
+        return earliest <= other.earliest && latest >= other.latest;
+    }
   
     static TimeBounds localNow();
         

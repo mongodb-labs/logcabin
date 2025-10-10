@@ -1,3 +1,20 @@
+LeaseGuard
+==========
+
+This is the LeaseGuard branch of the LogCabin repo. LeaseGuard is a new leader lease protocol; the
+changes on this branch include a prototype implementation of LeaseGuard on top of LogCabin, plus an
+implementation of Ongaro's lease protocol for comparison (Ongaro's thesis §6.4.1).
+
+To reproduce the charts in the LeaseGuard paper:
+
+```
+python3 leaseguard_experiments/network_latency_experiment.py --servers=server1,server2,server3 --trials 3
+python3 leaseguard_experiments/unavailability_experiment.py --servers=server1,server2,server3 
+python3 make_charts.py
+```
+
+Replace "server1,server2,server3" with three servers which the Python scripts can control via passwordless ssh.
+
 [![logo](logo/500px.png?raw=true)](logo/logo.svg)
 
 Overview

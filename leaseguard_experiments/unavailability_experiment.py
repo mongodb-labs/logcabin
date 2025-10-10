@@ -37,6 +37,7 @@ def _make_options():
     options = {}
     for (
         quorumCheckOnRead,
+        ongaroLeaseEnabled,
         leaseGuardEnabled,
         deferCommitEnabled,
         inheritLeaseEnabled,
@@ -44,19 +45,25 @@ def _make_options():
         reads_per_ms,
         name,
     ) in [
-        (False, False, False, False, 10, 20, "inconsistent"),
-        (True, False, False, False, 1, 2, "quorum"),  # Can't keep up with other configs
-        (False, True, False, False, 10, 20, "lease"),
-        (False, True, True, False, 10, 20, "defer\ncommit"),
-        (False, True, True, True, 10, 20, "inherit\nlease"),
+        (False, False, False, False, False, 10, 20, "inconsistent"),
+        (True, False, False, False, False, 1, 2, "quorum"),  # Can't keep up with other configs
+        (False, True, False, False, False, 10, 20, "Ongaro\nlease"),
+        (False, False, True, False, False, 10, 20, "LeaseGuard"),
+        (False, False, True, True, False, 10, 20, "defer\ncommit"),
+        (False, False, True, True, True, 10, 20, "inherit\nlease"),
     ]:
+        # Test lease expiration > election timeout.
+        delta = 2 * ELECTION_TIMEOUT_MS  
+        # Ongaro-style lease requires election timeout == lease timeout.
+        e_timeout = delta if ongaroLeaseEnabled else ELECTION_TIMEOUT_MS            
         options[name] = UnavailabilityBenchmarkOptions(
             quorumCheckOnRead=quorumCheckOnRead,
+            ongaroLeaseEnabled=ongaroLeaseEnabled,
             leaseGuardEnabled=leaseGuardEnabled,
             deferCommitEnabled=deferCommitEnabled,
             inheritLeaseEnabled=inheritLeaseEnabled,
-            electionTimeoutMilliseconds=ELECTION_TIMEOUT_MS,
-            delta=2 * ELECTION_TIMEOUT_MS,  # Test lease expiration > election timeout.
+            electionTimeoutMilliseconds=e_timeout,
+            delta=delta,
             writes_per_ms=writes_per_ms,
             reads_per_ms=reads_per_ms,
         )
@@ -215,6 +222,7 @@ ps aux | grep LogCabin""",
 
         df = pd.read_csv("unavailability_result.txt")
         df["quorumCheckOnRead"] = options.quorumCheckOnRead
+        df["ongaroLeaseEnabled"] = options.ongaroLeaseEnabled
         df["leaseGuardEnabled"] = options.leaseGuardEnabled
         df["deferCommitEnabled"] = options.deferCommitEnabled
         df["inheritLeaseEnabled"] = options.inheritLeaseEnabled

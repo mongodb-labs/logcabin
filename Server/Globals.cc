@@ -90,6 +90,7 @@ Globals::Globals()
     , stateMachine()
     , isPartitioned(false)
     , quorumCheckOnRead(true) // original Raft consistency mechanism
+    , ongaroLeaseEnabled(false)
     , leaseGuardEnabled(false)
     , deferCommitEnabled(false)
     , inheritLeaseEnabled(false)
@@ -188,11 +189,21 @@ Globals::init()
     serverStats.enable();
     
     quorumCheckOnRead = config.read<bool>("quorumCheckOnRead", true);
+    ongaroLeaseEnabled = config.read<bool>("ongaroLeaseEnabled", false);
     leaseGuardEnabled = config.read<bool>("leaseGuardEnabled", false);
     deferCommitEnabled = config.read<bool>("deferCommitEnabled", false);
     inheritLeaseEnabled = config.read<bool>("inheritLeaseEnabled", false);
     electionTimeoutRandomizationDisabled =
         config.read<bool>("electionTimeoutRandomizationDisabled", false);
+        
+    if (quorumCheckOnRead + ongaroLeaseEnabled + leaseGuardEnabled > 1) {
+        throw std::runtime_error("only one consistency option allowed");
+    }
+    
+    if ((deferCommitEnabled || inheritLeaseEnabled) && !leaseGuardEnabled) {
+        throw std::runtime_error(
+            "inheritLeaseEnabled and deferCommitEnabled require leaseGuardEnabled");
+    }
 }
 
 void
