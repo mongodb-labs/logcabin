@@ -48,19 +48,23 @@ class Stats:
         self.rows: list[Stats.Row] = []
 
     def load(self):
-        if os.path.exists(Stats.CSV_FILE_PATH):
-            with open(Stats.CSV_FILE_PATH, mode="r") as f:
-                reader = csv.DictReader(f)
-                if not reader.fieldnames:
-                    raise ValueError("CSV file has no columns.")
+        try:
+            if os.path.exists(Stats.CSV_FILE_PATH):
+                with open(Stats.CSV_FILE_PATH, mode="r") as f:
+                    reader = csv.DictReader(f)
+                    if not reader.fieldnames:
+                        raise ValueError("CSV file has no columns.")
 
-                for row in reader:
-                    self.rows.append(
-                        Stats.Row(
-                            options=dataclass_from_row(LatencyBenchmarkOptions, row),
-                            result=dataclass_from_row(BenchmarkResult, row),
+                    for row in reader:
+                        self.rows.append(
+                            Stats.Row(
+                                options=dataclass_from_row(LatencyBenchmarkOptions, row),
+                                result=dataclass_from_row(BenchmarkResult, row),
+                            )
                         )
-                    )
+        except Exception as e:
+            print(f"Failed to load existing stats from {Stats.CSV_FILE_PATH}: {e}")
+            raise
 
     def append(self, options: LatencyBenchmarkOptions, result: BenchmarkResult):
         self.rows.append(Stats.Row(options=options, result=result))
@@ -170,18 +174,20 @@ if __name__ == "__main__":
     stats = Stats()
     stats.load()
 
-    for quorumCheckOnRead, leaseGuardEnabled, deferCommitEnabled, inheritLeaseEnabled in [
-        (False, False, False, False),
-        (True, False, False, False),
-        (False, True, True, True),
+    for (quorum, ongaro, leaseGuard, deferCommit, inheritLease) in [
+        (False, False, False, False, False), # inconsistent
+        (True, False, False, False, False), # quorum check
+        (False, True, False, False, False), # ongaro lease
+        (False, False, True, True, True), # leaseguard with optimizations
     ]:
         for latencyMs in range(1, 11):
             options = LatencyBenchmarkOptions(
                 latencyMs=latencyMs,
-                quorumCheckOnRead=quorumCheckOnRead,
-                leaseGuardEnabled=leaseGuardEnabled,
-                deferCommitEnabled=deferCommitEnabled,
-                inheritLeaseEnabled=inheritLeaseEnabled,
+                quorumCheckOnRead=quorum,
+                ongaroLeaseEnabled=ongaro,
+                leaseGuardEnabled=leaseGuard,
+                deferCommitEnabled=deferCommit,
+                inheritLeaseEnabled=inheritLease,
             )
 
             n_already = len([r for r in stats.rows if r.options == options])

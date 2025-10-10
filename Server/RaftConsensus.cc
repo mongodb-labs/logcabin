@@ -32,6 +32,7 @@
 #include "Core/Random.h"
 #include "Core/StringUtil.h"
 #include "Core/ThreadId.h"
+#include "Core/Time.h"
 #include "Core/Util.h"
 #include "Protocol/Common.h"
 #include "RPC/ClientRPC.h"
@@ -178,6 +179,7 @@ Peer::Peer(uint64_t serverId, RaftConsensus& consensus)
     , nextIndex(consensus.log->getLastLogIndex() + 1)
     , matchIndex(0)
     , lastAckEpoch(0)
+    , lastSuccessfulHeartbeatTime(TimePoint::min())
     , nextHeartbeatTime(TimePoint::min())
     , backoffUntil(TimePoint::min())
     , rpcFailuresSinceLastWarning(0)
@@ -1667,10 +1669,12 @@ RaftConsensus::handleRequestVote(
 void RaftConsensus::replicate2(const Core::Buffer &operation, ClientRequest request)
 {
     std::unique_lock<Mutex> lockGuard(mutex);
-    
-    if (globals.leaseGuardEnabled && !globals.deferCommitEnabled &&
-        leaderLeaseStart() >= TimeBounds::localNow().earliest)
-    {
+
+    if (globals.leaseGuardEnabled 
+        && !globals.deferCommitEnabled 
+        && !leaseGuardTimeBounds().contains(TimeBounds::localNow())
+    ) {
+        // TODO: ensure this happens
         NOTICE("Reject write, no lease");
         return;
     }
@@ -2153,18 +2157,21 @@ RaftConsensus::advanceCommitIndexThreadMain()
     while (!exiting) {
         advanceCommitIndex();  // No-op if lease hasn't started.
         auto localNow = Core::Time::TimeBounds::localNow();
-        auto leaseStartAt = leaderLeaseStart();
-        VERBOSE("Now %s, leaseStart %lu (%s), timer thread waiting for %f sec",
-                localNow.toString().c_str(),
-                leaseStartAt,
-                leaseStartAt > localNow.latest ? "future" : "past",
-                (double(leaseStartAt) - double(localNow.latest)) / 1e9);
-
-        if (leaseStartAt > localNow.latest) {
-            stateChanged.wait_until(lockGuard,
-                                    Core::Time::SystemClock::time_point(
-                                    std::chrono::nanoseconds(leaseStartAt)));
+        if (globals.leaseGuardEnabled) {
+            auto leaseBounds = leaseGuardTimeBounds();
+            if (leaseBounds.earliest > localNow.latest) {
+                NOTICE("Now %s, leaseBounds %s, timer thread waiting for %f sec",
+                        localNow.toString().c_str(),
+                        leaseBounds.toString().c_str(),
+                        (double(leaseBounds.earliest) - double(localNow.latest)) / 1e9);
+                stateChanged.wait_until(lockGuard,
+                                        Core::Time::SystemClock::time_point(
+                                        std::chrono::nanoseconds(leaseBounds.earliest)));
+            } else {
+                stateChanged.wait(lockGuard);
+            }
         } else {
+            // LeaseGuard is disabled.
             stateChanged.wait(lockGuard);
         }
     }
@@ -2201,9 +2208,9 @@ RaftConsensus::extendLeaseThreadMain()
             lastExtended = localNow.latest;
         }
         
-        auto microseconds = freq / 1000;
+        auto microseconds = freq / 1000L;
         lockGuard.unlock();
-        usleep(microseconds);
+        usleep(static_cast<useconds_t>(microseconds));
         lockGuard.lock();
     }
 }
@@ -2328,15 +2335,17 @@ RaftConsensus::advanceCommitIndex()
         return;
     }
 
-    auto leaseStartAt = leaderLeaseStart();
-    auto localNow = TimeBounds::localNow();
-    if (leaseStartAt >= localNow.earliest)
-    {
-        VERBOSE(
-            "Now %s, old leader might serve reads until %lu, %f sec from now",
-            localNow.toString().c_str(), leaseStartAt,
-            double(leaseStartAt - localNow.earliest) / 1e9);
-        return;
+    if (globals.leaseGuardEnabled) {
+        auto leaseBounds = leaseGuardTimeBounds();
+        auto localNow = TimeBounds::localNow();
+        if (leaseBounds.earliest >= localNow.earliest)
+        {
+            VERBOSE(
+                "Now %s, old leader might serve reads until %lu, %f sec from now",
+                localNow.toString().c_str(), leaseBounds.earliest,
+                double(leaseBounds.earliest - localNow.earliest) / 1e9);
+            return;
+        }
     }
 
     // calculate the largest entry ID stored on a quorum of servers
@@ -2420,9 +2429,8 @@ void
 RaftConsensus::appendEntries(std::unique_lock<Mutex>& lockGuard,
                              Peer& peer, uint64_t peerThreadId)
 {
-    uint64_t lastLogIndex = log->getLastLogIndex();
     uint64_t prevLogIndex = peer.nextIndex - 1;
-    assert(prevLogIndex <= lastLogIndex);
+    assert(prevLogIndex <= log->getLastLogIndex());
 
     // Don't have needed entry: send a snapshot instead.
     if (peer.nextIndex < log->getLogStartIndex()) {
@@ -2464,6 +2472,14 @@ RaftConsensus::appendEntries(std::unique_lock<Mutex>& lockGuard,
     Peer::CallStatus status;
     if (!globals.isPartitioned)
     {
+        // NOTICE("Sending AppendEntries to %lu: term %lu, prevLogIndex %lu, "
+        //        "prevLogTerm %lu, numEntries %lu, commitIndex %lu",
+        //        peer.serverId,
+        //        request.term(),
+        //        request.prev_log_index(),
+        //        request.prev_log_term(),
+        //        numEntries,
+        //        request.commit_index());
         status = peer.callRPC(
                 Protocol::Raft::OpCode::APPEND_ENTRIES,
                 request, response,
@@ -2477,6 +2493,7 @@ RaftConsensus::appendEntries(std::unique_lock<Mutex>& lockGuard,
     }
     switch (status) {
         case Peer::CallStatus::OK:
+            peer.lastSuccessfulHeartbeatTime = std::max(peer.lastSuccessfulHeartbeatTime, start);
             break;
         case Peer::CallStatus::FAILED:
             peer.suppressBulkData = true;
@@ -2632,6 +2649,7 @@ RaftConsensus::installSnapshot(std::unique_lock<Mutex>& lockGuard,
     }
     switch (status) {
         case Peer::CallStatus::OK:
+            peer.lastSuccessfulHeartbeatTime = std::max(peer.lastSuccessfulHeartbeatTime, start);
             break;
         case Peer::CallStatus::FAILED:
             peer.suppressBulkData = true;
@@ -2988,6 +3006,59 @@ RaftConsensus::replicateEntry2(Log::Entry& entry,
                               ClientRequest request)
 {
     if (state == State::LEADER && !exiting) {
+        if (globals.ongaroLeaseEnabled) {
+            // Find the most recent time a majority (including self) was heard from.
+            std::vector<TimePoint> heartbeatTimes;
+            configuration->forEach([&heartbeatTimes](Server& server) {
+                heartbeatTimes.push_back(server.getLastSuccessfulHeartbeatTime());
+            });
+
+            std::sort(heartbeatTimes.begin(), heartbeatTimes.end());
+            // This server is also in heartbeatTimes and its "last heartbeat" is now. So e.g. if there
+            // are 3 servers the lease starts at heartbeatTimes[1], which is >= 2 of the heartbeats,
+            // thus >= the majority of heartbeats.
+            size_t quorum = (heartbeatTimes.size() + 1) / 2;
+            auto leaseStart = heartbeatTimes[quorum - 1];
+
+            // TODO: remove
+            std::ostringstream oss;
+            for (size_t i = 0; i < heartbeatTimes.size(); ++i) {
+                if (i > 0) oss << ", ";
+                oss << heartbeatTimes[i].time_since_epoch();
+            }
+            
+            auto now = Clock::now();
+            if (now < leaseStart) {
+                // TODO: ensure this happens in unavailability experiment?
+                NOTICE("Ongaro lease not started, now=%s, heartbeatTimes.size()=%zu, quorum=%zu, heartbeatTimes=[%s], leaseStart=%s",
+                    Core::StringUtil::toString(now).c_str(),
+                    heartbeatTimes.size(), 
+                    quorum,
+                    oss.str().c_str(),
+                    Core::StringUtil::toString(leaseStart).c_str());
+                Protocol::Client::Error error;
+                error.set_error_code(Protocol::Client::Error::NOT_LEADER);
+                request.rpc.returnError(error);
+                return;
+            }
+            
+            auto leaseEnd = leaseStart + LEASE_TIMEOUT_DELTA;
+            if (now > leaseEnd) {
+                // TODO: ensure this happens in unavailability experiment?
+                NOTICE("Ongaro lease expired, now=%s, heartbeatTimes.size()=%zu, quorum=%zu, heartbeatTimes=[%s], leaseStart=%s, leaseEnd=%s",
+                    Core::StringUtil::toString(now).c_str(),
+                    heartbeatTimes.size(), 
+                    quorum,
+                    oss.str().c_str(),
+                    Core::StringUtil::toString(leaseStart).c_str(),
+                    Core::StringUtil::toString(leaseEnd).c_str());
+                Protocol::Client::Error error;
+                error.set_error_code(Protocol::Client::Error::NOT_LEADER);
+                request.rpc.returnError(error);
+                return;
+            }
+        }
+
         entry.set_term(currentTerm);
         entry.set_cluster_time(clusterClock.leaderStamp());
         setLocalTime(entry);
@@ -3035,6 +3106,7 @@ RaftConsensus::requestVote(std::unique_lock<Mutex>& lockGuard, Peer& peer,
     VERBOSE("requestVote done");
     switch (status) {
         case Peer::CallStatus::OK:
+            peer.lastSuccessfulHeartbeatTime = std::max(peer.lastSuccessfulHeartbeatTime, start);
             break;
         case Peer::CallStatus::FAILED:
             peer.suppressBulkData = true;
@@ -3294,35 +3366,55 @@ RaftConsensus::upToDateLeader(std::unique_lock<Mutex>& lockGuard) const
     }
 }
 
-uint64_t RaftConsensus::leaderLeaseStart() const
+RaftConsensusInternal::TimeBounds RaftConsensus::leaseGuardTimeBounds() const
 {
     if (!globals.leaseGuardEnabled) {
-        return 0;
+        // LeaseGuard disabled, we always have a "valid lease". Ongaro-style leases done elsewhere.
+        return TimeBounds{0, std::numeric_limits<uint64_t>::max()};
     }
     
-    TimeBounds t;
+    uint64_t start;
     if (log->getLogStartIndex() <= lastEntryInPreviousTermIndex 
         && lastEntryInPreviousTermIndex <= log->getLastLogIndex())
     {
         const Log::Entry &entry = log->getEntry(lastEntryInPreviousTermIndex);
         assert(entry.term() < currentTerm);
-        t = TimeBounds(entry);
-        VERBOSE("Current term %lu, found term %lu index %lu entry with local time %s",
-                currentTerm, entry.term(), entry.index(), t.toString().c_str());
+        start = entry.local_time_latest() + LEASE_TIMEOUT_DELTA.count();
+        VERBOSE("Current term %lu, found term %lu index %lu entry with local time %lu",
+                currentTerm, entry.term(), entry.index(), start);
     } else if (lastSnapshotTerm < currentTerm && lastSnapshotIndex > 0) {
         VERBOSE("Current term %lu, last log index %lu with term %lu, using last snapshot with" 
-                " local time %s", currentTerm, log->getLastLogIndex(), lastSnapshotTerm,
-                lastSnapshotLocalTimeBounds.toString().c_str());
-        t = lastSnapshotLocalTimeBounds;
+                " local time %lu", currentTerm, log->getLastLogIndex(), lastSnapshotTerm,
+                lastSnapshotLocalTimeBounds.latest);
+        start = lastSnapshotLocalTimeBounds.latest + LEASE_TIMEOUT_DELTA.count();
     } else {
         if (state == State::LEADER) {
             // No entries in past terms. I'm the leader of the first term ever.
             VERBOSE("I'm the leader of the first term, lease starts now");
         }
-        return 0;
+        start = 0;
+    }
+    
+    uint64_t end;
+    if (log->getLogStartIndex() <= commitIndex 
+        && commitIndex <= log->getLastLogIndex()) {
+        const Log::Entry &entry = log->getEntry(commitIndex);
+        assert(entry.term() <= currentTerm);
+        end = entry.local_time_earliest() + LEASE_TIMEOUT_DELTA.count();
+        VERBOSE("Current term %lu, found term %lu index %lu entry with local time %lu",
+                currentTerm, entry.term(), entry.index(), entry.local_time_earliest());
+    } else if (commitIndex == lastSnapshotIndex && lastSnapshotIndex > 0) {
+        end = lastSnapshotLocalTimeBounds.earliest + LEASE_TIMEOUT_DELTA.count();
+        VERBOSE("Current term %lu, last log index %lu with term %lu, using last snapshot with" 
+                " local time %lu", currentTerm, log->getLastLogIndex(), lastSnapshotTerm,
+                lastSnapshotLocalTimeBounds.earliest);
+    } else {
+        // No entries committed yet in this term. We don't have a valid lease.
+        VERBOSE("No entries committed yet in this term, lease expired");
+        end = 0;    
     }
 
-    return t.latest + LEASE_TIMEOUT_DELTA.count();
+    return {start, end};
 }
 
 std::ostream&

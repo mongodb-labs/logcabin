@@ -16,7 +16,7 @@ _this_dir = os.path.dirname(__file__)
 
 def chart_network_latency():
     csv = pd.read_csv(f"{_this_dir}/network_latency_experiment.csv")
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True, figsize=(5, 4))
+    fig, (ax1, ax2, ax3, ax4) = plt.subplots(3, 1, sharex=True, figsize=(5, 4))
 
     ax3.set(xlabel="added one-way network latency (ms)")
 
@@ -34,7 +34,7 @@ def chart_network_latency():
     ax1.yaxis.set_major_locator(plt.MultipleLocator(10))
     ax3.yaxis.set_major_locator(plt.MultipleLocator(10))
     
-    for ax in [ax1, ax2, ax3]:
+    for ax in [ax1, ax2, ax3, ax4]:
         ax.yaxis.grid(True, which='both', linestyle='--', linewidth=0.5)
         ax.set_axisbelow(True)
 
@@ -44,17 +44,23 @@ def chart_network_latency():
         (0.25, "C0", "inconsistent", "read", ax1),
         (-0.25, "C1", "quorum", "write", ax2),
         (0.25, "C0", "quorum", "read", ax2),
-        (-0.25, "C1", "lease", "write", ax3),
-        (0.25, "C0", "lease", "read", ax3),
+        (-0.25, "C1", "ongaroLease", "write", ax3),
+        (0.25, "C0", "ongaroLease", "read", ax3),
+        (-0.25, "C1", "leaseGuard", "write", ax4),
+        (0.25, "C0", "leaseGuard", "read", ax4),
     ]
 
     for offset, color, config_name, operationType, ax in combos:
         if config_name == "inconsistent":
             config_predicate = (csv["quorumCheckOnRead"] == False) & (
                 csv["leaseGuardEnabled"] == False
+            ) & (
+                csv["ongaroLeaseEnabled"] == False
             )
         elif config_name == "quorum":
             config_predicate = csv["quorumCheckOnRead"]
+        elif config_name == "ongaroLease":
+            config_predicate = csv["ongaroLeaseEnabled"]
         else:
             config_predicate = (
                 (csv["leaseGuardEnabled"])
@@ -71,6 +77,7 @@ def chart_network_latency():
                     "latencyMs",
                     "operationType",
                     "quorumCheckOnRead",
+                    "ongaroLeaseEnabled",
                     "leaseGuardEnabled",
                     "deferCommitEnabled",
                     "inheritLeaseEnabled",
@@ -184,7 +191,10 @@ def chart_unavailability():
 
     def resample_data(benchmark_index: int, options: UnavailabilityBenchmarkOptions):
         df = pd.read_csv(f"{_this_dir}/unavailability_experiment-{benchmark_index}.csv")
-        for column in ["quorumCheckOnRead", "leaseGuardEnabled", "deferCommitEnabled"]:
+        for column in ["quorumCheckOnRead",
+                       "ongaroLeaseEnabled",
+                       "leaseGuardEnabled",
+                       "deferCommitEnabled"]:
             assert df[column].nunique() == 1 and df[column].iloc[0] == getattr(
                 options, column
             )
@@ -226,7 +236,7 @@ def chart_unavailability():
         name: resample_data(i, options)
         for i, (name, options) in enumerate(OPTIONS.items())
     }
-    fig, axes = plt.subplots(len(OPTIONS), 1, sharex=True, sharey=False, figsize=(5, 5))
+    fig, axes = plt.subplots(len(OPTIONS), 1, sharex=True, sharey=False, figsize=(5, 6))
     axes[-1].set(xlabel=r"time in milliseconds $\rightarrow$")
 
     for i, (name, df) in enumerate(dfs.items()):

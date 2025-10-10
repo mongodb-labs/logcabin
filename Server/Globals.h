@@ -211,7 +211,7 @@ class Globals {
      */
     bool isPartitioned;
 
-    bool quorumCheckOnRead, leaseGuardEnabled, deferCommitEnabled, inheritLeaseEnabled;
+    bool quorumCheckOnRead, ongaroLeaseEnabled, leaseGuardEnabled, deferCommitEnabled, inheritLeaseEnabled;
     
     bool electionTimeoutRandomizationDisabled;
 

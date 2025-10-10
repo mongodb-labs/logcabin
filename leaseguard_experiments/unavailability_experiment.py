@@ -37,6 +37,7 @@ def _make_options():
     options = {}
     for (
         quorumCheckOnRead,
+        ongaroLeaseEnabled,
         leaseGuardEnabled,
         deferCommitEnabled,
         inheritLeaseEnabled,
@@ -44,14 +45,16 @@ def _make_options():
         reads_per_ms,
         name,
     ) in [
-        (False, False, False, False, 10, 20, "inconsistent"),
-        (True, False, False, False, 1, 2, "quorum"),  # Can't keep up with other configs
-        (False, True, False, False, 10, 20, "lease"),
-        (False, True, True, False, 10, 20, "defer\ncommit"),
-        (False, True, True, True, 10, 20, "inherit\nlease"),
+        (False, False, False, False, False, 10, 20, "inconsistent"),
+        (True, False, False, False, False, 1, 2, "quorum"),  # Can't keep up with other configs
+        (False, True, False, False, False, 10, 20, "Ongaro\nlease"),
+        (False, False, True, False, False, 10, 20, "LeaseGuard"),
+        (False, False, True, True, False, 10, 20, "defer\ncommit"),
+        (False, False, True, True, True, 10, 20, "inherit\nlease"),
     ]:
         options[name] = UnavailabilityBenchmarkOptions(
             quorumCheckOnRead=quorumCheckOnRead,
+            ongaroLeaseEnabled=ongaroLeaseEnabled,
             leaseGuardEnabled=leaseGuardEnabled,
             deferCommitEnabled=deferCommitEnabled,
             inheritLeaseEnabled=inheritLeaseEnabled,
@@ -215,6 +218,7 @@ ps aux | grep LogCabin""",
 
         df = pd.read_csv("unavailability_result.txt")
         df["quorumCheckOnRead"] = options.quorumCheckOnRead
+        df["ongaroLeaseEnabled"] = options.ongaroLeaseEnabled
         df["leaseGuardEnabled"] = options.leaseGuardEnabled
         df["deferCommitEnabled"] = options.deferCommitEnabled
         df["inheritLeaseEnabled"] = options.inheritLeaseEnabled
