@@ -48,9 +48,9 @@ def _make_options():
         (False, False, False, False, False, 10, 20, "inconsistent"),
         (True, False, False, False, False, 1, 2, "quorum"),  # Can't keep up with other configs
         (False, True, False, False, False, 10, 20, "Ongaro\nlease"),
-        (False, False, True, False, False, 10, 20, "LeaseGuard"),
+        (False, False, True, False, False, 10, 20, "log-based\nlease"),
         (False, False, True, True, False, 10, 20, "defer\ncommit"),
-        (False, False, True, True, True, 10, 20, "inherit\nlease"),
+        (False, False, True, True, True, 10, 20, "LeaseGuard"),
     ]:
         # Test lease expiration > election timeout.
         delta = 2 * ELECTION_TIMEOUT_MS  
