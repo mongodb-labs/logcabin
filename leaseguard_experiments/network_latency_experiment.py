@@ -2,7 +2,6 @@
 
 import argparse
 import csv
-import os
 import time
 from dataclasses import dataclass
 
