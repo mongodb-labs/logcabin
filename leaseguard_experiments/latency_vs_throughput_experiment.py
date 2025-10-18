@@ -1,4 +1,4 @@
-"""Test the effect of network latency, with or without leases."""
+"""Test the effect of throughput on latency, with or without leases."""
 
 import argparse
 import csv
@@ -27,14 +27,15 @@ parser.add_argument(
 args = parser.parse_args()
 SERVERS = args.servers.split(",")
 
+EXPERIMENT_DURATION_SEC = 30
 
 @dataclass(kw_only=True)
-class LatencyBenchmarkOptions(BenchmarkOptions):
-    latencyMs: int = 0
-    operations: int = 100000
+class LatencyVsThroughputBenchmarkOptions(BenchmarkOptions):
+    reads: int
+    writes: int
 
 
-def run_benchmark(options: LatencyBenchmarkOptions, stats: Stats):
+def run_benchmark(options: LatencyVsThroughputBenchmarkOptions, stats: Stats):
     write_config_files(SERVERS, options)
 
     for server_id, addr in enumerate(SERVERS, start=1):
@@ -42,7 +43,8 @@ def run_benchmark(options: LatencyBenchmarkOptions, stats: Stats):
         run_ssh_command(
             addr,
             f"""
-        sudo tc qdisc del dev ens5 root > /dev/null 2>&1 || true # cleanup past rules
+        # cleanup past rules from network_latency_experiment.py
+        sudo tc qdisc del dev ens5 root > /dev/null 2>&1 || true
         cd logcabin
         killall -q -9 perf LogCabin Reconfigure || true
         rm -rf /tmp/logcabin {server_id}.log
@@ -75,26 +77,15 @@ def run_benchmark(options: LatencyBenchmarkOptions, stats: Stats):
         f"./build/Examples/HelloWorld --cluster={','.join(SERVERS)}", timeout=30
     )
 
-    for server_id, addr in enumerate(SERVERS, start=1):
-        title(f"CONFIG NETWORK {addr}")
-        run_ssh_command(
-            addr,
-            f"""
-        sudo iptables -t mangle -A OUTPUT -p tcp --dport 5254 -j MARK --set-mark 1
-        sudo tc qdisc add dev ens5 root handle 1: prio
-        sudo tc qdisc add dev ens5 parent 1:1 handle 10: netem delay {options.latencyMs}ms
-        sudo tc filter add dev ens5 protocol ip parent 1:0 prio 1 handle 1 fw flowid 1:1
-        """,
-        )
-
     title("EXPERIMENT")
-    reads = options.operations * 2 // 3
-    writes = options.operations - reads
     try:
         run_command(
             f"./build/Examples/NetworkLatencyTest --cluster={','.join(SERVERS)} "
             f"--size={options.size} "
-            f"--timeout=30s --reads={reads} --writes={writes} --resultsFile=one_result.txt",
+            f"--timeout={EXPERIMENT_DURATION_SEC}s "
+            f"--reads={options.reads} "
+            f"--writes={options.writes} "
+            f"--resultsFile=one_result.txt",
             timeout=90,
         )
     finally:
@@ -125,7 +116,7 @@ def run_benchmark(options: LatencyBenchmarkOptions, stats: Stats):
 
 
 if __name__ == "__main__":
-    stats = Stats(options_type=LatencyBenchmarkOptions,
+    stats = Stats(options_type=LatencyVsThroughputBenchmarkOptions,
                   result_type=BenchmarkResult,
                   csv_path=__file__.replace(".py", ".csv"))
     stats.load()
@@ -136,24 +127,29 @@ if __name__ == "__main__":
         (False, True, False, False, False), # ongaro lease
         (False, False, True, True, True), # leaseguard with optimizations
     ]:
-        for latencyMs in range(1, 11):
-            options = LatencyBenchmarkOptions(
-                latencyMs=latencyMs,
-                quorumCheckOnRead=quorum,
-                ongaroLeaseEnabled=ongaro,
-                leaseGuardEnabled=leaseGuard,
-                deferCommitEnabled=deferCommit,
-                inheritLeaseEnabled=inheritLease,
-            )
+        for kilo_ops_per_sec in range(10, 80, 10):
+            for write_ratio in (0, 0.25, 0.5, 0.75, 1):
+                operations = EXPERIMENT_DURATION_SEC * kilo_ops_per_sec * 1000
+                writes = int(operations * write_ratio)
+                reads = operations - writes
+                options = LatencyVsThroughputBenchmarkOptions(
+                    reads=reads,
+                    writes=writes,
+                    quorumCheckOnRead=quorum,
+                    ongaroLeaseEnabled=ongaro,
+                    leaseGuardEnabled=leaseGuard,
+                    deferCommitEnabled=deferCommit,
+                    inheritLeaseEnabled=inheritLease,
+                )
 
-            n_already = len([r for r in stats.rows if r.options == options])
-            n_needed = max(0, args.trials - n_already)
-            print(f"{n_needed} trials for {options}")
-            for _ in range(n_needed):
-                while True:
-                    try:
-                        run_benchmark(options, stats)
-                        break
-                    except Exception as e:
-                        print(e)
-                        print("RETRYING")
+                n_already = len([r for r in stats.rows if r.options == options])
+                n_needed = max(0, args.trials - n_already)
+                print(f"{n_needed} trials for {options}")
+                for _ in range(n_needed):
+                    while True:
+                        try:
+                            run_benchmark(options, stats)
+                            break
+                        except Exception as e:
+                            print(e)
+                            print("RETRYING")

@@ -33,6 +33,7 @@
 #include <fstream>
 #include <getopt.h>
 #include <iostream>
+#include <limits>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -81,7 +82,8 @@ public:
         , cluster("logcabin:5254")
         , logPolicy("")
         , size(1024)
-        , totalOperations(1000)
+        , readOperations(6666)
+        , writeOperations(3333)
         , timeout(parseNonNegativeDuration("30s"))
         , resultsFileName("")
     {
@@ -91,12 +93,13 @@ public:
                                                   {"help", no_argument, NULL, 'h'},
                                                   {"size", required_argument, NULL, 's'},
                                                   {"timeout", required_argument, NULL, 't'},
-                                                  {"operations", required_argument, NULL, 'n'},
+                                                  {"reads", required_argument, NULL, 'r'},
+                                                  {"writes", required_argument, NULL, 'w'},
                                                   {"verbose", no_argument, NULL, 'v'},
                                                   {"verbosity", required_argument, NULL, 256},
                                                   {"resultsFile", required_argument, NULL, 'f'},
                                                   {0, 0, 0, 0}};
-            int c = getopt_long(argc, argv, "c:hs:t:n:vf:", longOptions, NULL);
+            int c = getopt_long(argc, argv, "c:hs:t:r:w:vf:", longOptions, NULL);
 
             // Detect the end of the options.
             if (c == -1)
@@ -116,8 +119,11 @@ public:
             case 's':
                 size = uint64_t(atol(optarg));
                 break;
-            case 'n':
-                totalOperations = uint64_t(atol(optarg));
+            case 'r':
+                readOperations = uint64_t(atol(optarg));
+                break;
+            case 'w':
+                writeOperations = uint64_t(atol(optarg));
                 break;
             case 'v':
                 logPolicy = "VERBOSE";
@@ -168,8 +174,11 @@ public:
                   << "  --timeout <time>        "
                   << "Time after which to exit [default: 30s]" << std::endl
 
-                  << "  --operations <num>      "
-                  << "Number of operations [default: 1000]" << std::endl
+                  << "  --reads <num>      "
+                  << "Number of read operations [default: 6666]" << std::endl
+
+                  << "  --writes <num>     "
+                  << "Number of write operations [default: 3333]" << std::endl
 
                   << "  --resultsFile <file>    "
                   << "Output file for operations/sec value" << std::endl
@@ -194,13 +203,16 @@ public:
     std::string cluster;
     std::string logPolicy;
     uint64_t size;
-    uint64_t totalOperations;
+    uint64_t readOperations;
+    uint64_t writeOperations;
     uint64_t timeout;
     std::string resultsFileName;
 };
 
 uint64_t getPercentile(const std::vector<uint64_t> &sortedLatencies, double percentile)
 {
+    if (sortedLatencies.size() == 0)
+        return 0;
     size_t index = static_cast<size_t>(percentile * sortedLatencies.size());
     return sortedLatencies[std::min(index, sortedLatencies.size() - 1)];
 }
@@ -244,15 +256,17 @@ int main(int argc, char **argv)
         LogCabin::Client::Debug::setLogPolicy(
             LogCabin::Client::Debug::logPolicyFromString(options.logPolicy));
 
-        uint64_t readOperations = options.totalOperations * 2 / 3;
-        uint64_t writeOperations = options.totalOperations / 3;
+        uint64_t readOperations = options.readOperations;
+        uint64_t writeOperations = options.writeOperations;
         NOTICE("Performing %lu reads and %lu writes", readOperations, writeOperations);
         uint64_t startNanos = timeNanos();
         uint64_t nowNanos = startNanos;
         uint64_t logIntervalNanos = 1000000000; // 1 second
         uint64_t nextLogTimeNanos = startNanos + logIntervalNanos;
-        uint64_t nextReadTimeNanos = startNanos;
-        uint64_t nextWriteTimeNanos = startNanos;
+        uint64_t nextReadTimeNanos = 
+            readOperations > 0 ? startNanos : std::numeric_limits<uint64_t>::max();
+        uint64_t nextWriteTimeNanos = 
+            writeOperations > 0 ? startNanos : std::numeric_limits<uint64_t>::max();
         uint64_t whenToStopNanos = startNanos + options.timeout;
         std::mutex resultsMutex;
         std::vector<uint64_t> readLatencies;
@@ -268,7 +282,6 @@ int main(int argc, char **argv)
 
             while (nowNanos < whenToStopNanos)
             {
-                // Do 2/3rds reads and 1/3rd writes.
                 if (nowNanos >= nextReadTimeNanos)
                 {
                     tree.asyncRead(key,

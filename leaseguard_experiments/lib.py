@@ -3,8 +3,11 @@ import subprocess
 import threading
 import time
 from typing import Any
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, asdict
 from datetime import datetime
+import csv
+import os
+from typing import Type
 
 import paramiko
 
@@ -37,6 +40,65 @@ def dataclass_from_row(dataclass_type, row):
 
 def dataclass_fieldnames(dataclass_type):
     return [f.name for f in fields(dataclass_type)]
+
+
+class Stats:
+    """Generic CSV-backed stats manager for an (options_dataclass, result_dataclass).
+
+    Usage:
+      stats = Stats(options_type=LatencyBenchmarkOptions, result_type=BenchmarkResult,
+                    csv_path="/path/to/file.csv")
+      stats.load()
+      stats.append(options, result)
+      stats.save()
+    """
+
+    def __init__(
+        self,
+        options_type: Type,
+        result_type: Type,
+        csv_path: str,
+    ) -> None:
+        self.options_type = options_type
+        self.result_type = result_type
+        self.csv_path = csv_path
+        self.rows: list[dict] = []
+
+    class Row:
+        def __init__(self, options, result):
+            self.options = options
+            self.result = result
+
+    def load(self):
+        try:
+            if os.path.exists(self.csv_path):
+                with open(self.csv_path, mode="r") as f:
+                    reader = csv.DictReader(f)
+                    if not reader.fieldnames:
+                        raise ValueError(f"{self.csv_path} has no columns.")
+
+                    for row in reader:
+                        options = dataclass_from_row(self.options_type, row)
+                        result = dataclass_from_row(self.result_type, row)
+                        self.rows.append(Stats.Row(options=options, result=result))
+        except Exception as e:
+            print(f"Failed to load existing stats from {self.csv_path}: {e}")
+            raise
+
+    def append(self, options, result):
+        self.rows.append(Stats.Row(options=options, result=result))
+
+    def save(self):
+        with open(self.csv_path, mode="w") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=(
+                    dataclass_fieldnames(self.options_type)
+                    + dataclass_fieldnames(self.result_type)
+                ),
+            )
+            writer.writeheader()
+            writer.writerows(asdict(row.options) | asdict(row.result) for row in self.rows)
 
 
 @dataclass(kw_only=True)
