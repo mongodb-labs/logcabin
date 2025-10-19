@@ -2,8 +2,8 @@
 
 import argparse
 import csv
-import os
 import time
+import traceback
 from dataclasses import dataclass
 
 from lib import (
@@ -27,7 +27,7 @@ parser.add_argument(
 args = parser.parse_args()
 SERVERS = args.servers.split(",")
 
-EXPERIMENT_DURATION_SEC = 30
+EXPERIMENT_DURATION_SEC = 15
 
 @dataclass(kw_only=True)
 class LatencyVsThroughputBenchmarkOptions(BenchmarkOptions):
@@ -127,8 +127,8 @@ if __name__ == "__main__":
         (False, True, False, False, False), # ongaro lease
         (False, False, True, True, True), # leaseguard with optimizations
     ]:
-        for kilo_ops_per_sec in range(10, 80, 10):
-            for write_ratio in (0, 0.25, 0.5, 0.75, 1):
+        for kilo_ops_per_sec in range(5, 85, 5):
+            for write_ratio in (0, 0.25, 0.5, 0.75):
                 operations = EXPERIMENT_DURATION_SEC * kilo_ops_per_sec * 1000
                 writes = int(operations * write_ratio)
                 reads = operations - writes
@@ -142,7 +142,8 @@ if __name__ == "__main__":
                     inheritLeaseEnabled=inheritLease,
                 )
 
-                n_already = len([r for r in stats.rows if r.options == options])
+                # Writes and reads are separate rows, so there are 2 rows per trial.
+                n_already = len([r for r in stats.rows if r.options == options]) // 2
                 n_needed = max(0, args.trials - n_already)
                 print(f"{n_needed} trials for {options}")
                 for _ in range(n_needed):
@@ -151,5 +152,5 @@ if __name__ == "__main__":
                             run_benchmark(options, stats)
                             break
                         except Exception as e:
-                            print(e)
+                            traceback.print_exc()
                             print("RETRYING")

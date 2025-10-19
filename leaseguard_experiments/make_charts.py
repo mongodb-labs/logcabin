@@ -314,10 +314,127 @@ def chart_unavailability():
     _logger.info(f"Created {chart_path}")
 
 
+def chart_latency_vs_throughput():
+    """Plot latency (p50) vs throughput with one subplot per configuration.
+
+    Each subplot corresponds to one configuration (the first five boolean
+    options). Within a subplot we draw a separate line per write ratio.
+    """
+    csv = pd.read_csv(f"{_this_dir}/latency_vs_throughput_experiment.csv")
+    csv["write_ratio"] = csv["writes"] / (csv["reads"] + csv["writes"])
+    config_keys = (
+        "quorumCheckOnRead",
+        "ongaroLeaseEnabled",
+        "leaseGuardEnabled",
+        "deferCommitEnabled",
+        "inheritLeaseEnabled",
+    )
+
+    names = {
+        (False, False, False, False, False): "inconsistent",
+        (True, False, False, False, False): "quorum",
+        (False, True, False, False, False): "Ongaro lease",
+        (False, False, True, True, True): "LeaseGuard",
+    }
+
+    # Mean per trial (grouping by config keys + reads/writes to pair read/write rows).
+    mean_per_trial = (
+        csv.groupby(list(config_keys) + ["write_ratio", "reads", "writes", "operationType"])
+        [["opsPerSec", "p50latencyNanos"]].mean().reset_index())
+
+    # Pivot read/write into columns.
+    pivot = mean_per_trial.pivot_table(
+        index=list(config_keys) + ["write_ratio", "reads", "writes"],
+        columns="operationType",
+        values=["opsPerSec", "p50latencyNanos"])
+    pivot.columns = [f"{v}_{k}" for v, k in pivot.columns]
+    pivot = pivot.reset_index()
+
+    # Compute combined throughput and weighted p50 (ms)
+    pivot["total_ops_per_sec"] = pivot["opsPerSec_read"] + pivot["opsPerSec_write"]
+    pivot["combined_p50_ms"] = (
+        (pivot["p50latencyNanos_read"] * pivot["opsPerSec_read"]
+         + pivot["p50latencyNanos_write"] * pivot["opsPerSec_write"])
+        / pivot["total_ops_per_sec"]
+    ) / 1_000_000.0
+
+    # Group by configurations (first five keys).
+    grouped = dict(list(pivot.groupby(["write_ratio"] + list(config_keys))))
+    for write_ratio in sorted(pivot["write_ratio"].unique()):
+        fig, axes = plt.subplots(len(names), 1, sharex=True, figsize=(6, 1.6 * len(names)))
+        for i, (group_vars, config_name) in enumerate(names.items()):
+            group_df = grouped[(write_ratio,) + group_vars]
+            ax_i = axes[i]
+            ax_i.set_yscale("log")
+            ax_i.set_ylim(0.04, 1000)
+            ax_i.set_yticks([0.1, 1, 10, 100, 1000])
+            ax_i.set_yticklabels(["0.1", "1", "10", "100", "1000"])
+            ax_i.yaxis.grid = ax_i.xaxis.grid = lambda *args, **kwargs: None
+            ax_i.plot(
+                group_df["total_ops_per_sec"],
+                group_df["combined_p50_ms"],
+                linewidth=0.75,
+                marker="o",
+                markersize=3,
+                zorder=2,
+            )
+            if i == 0:
+                fig.suptitle(f"{int(write_ratio * 100)}% write ratio", y=0.99, fontsize=14)
+            # Add a small label next to each point with its (x, y) rounded to int.
+            # for xi, yi in zip(group_df["total_ops_per_sec"], group_df["combined_p50_ms"]):
+            #     ax_i.annotate(
+            #         f"{int(round(xi))},{int(round(yi))}",
+            #         xy=(xi, yi),
+            #         xytext=(3, 3),
+            #         textcoords="offset points",
+            #         fontsize=8,
+            #         zorder=4,
+            #     )
+
+            # interior label
+            ax_i.text(
+                0.02, 0.7, 
+                config_name,
+                transform=ax_i.transAxes,
+                verticalalignment='top',
+                horizontalalignment='left',
+                fontsize=12,
+            )
+
+            ax_i.yaxis.grid(True, which="both", linestyle="--", linewidth=0.5)
+            ax_i.set_axisbelow(True)
+            for spine in ax_i.spines.values():
+                spine.set_linewidth(0.5)
+
+        axes[-1].set(xlabel="actual throughput (ops/sec)")
+        axes[0].set_ylabel("average latency (ms)")
+
+        # Legend for write ratios at the top
+        handles, labels = axes[0].get_legend_handles_labels()
+        if handles:
+            fig.legend(handles, labels, loc="upper center", ncol=5, frameon=False)
+
+        fig.tight_layout()
+        fig.subplots_adjust(top=0.92, hspace=0.4)
+        chart_path = f"{_this_dir}/latency_vs_throughput_experiment_logcabin_{write_ratio}.pdf"
+        fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
+        _logger.info(f"Created {chart_path}")
+
+        csv_rows = []
+        for group_vars, group_df in grouped.items():
+            if group_vars[0] == write_ratio:
+                csv_rows.append(group_df)
+        df_out = pd.concat(csv_rows, ignore_index=True)
+        csv_path = chart_path.replace(".pdf", ".csv")
+        df_out.to_csv(csv_path, index=False)
+        _logger.info(f"Created {csv_path}")
+
+
 if __name__ == "__main__":
     chart_funcs = {
         "network_latency": chart_network_latency,
         "unavailability": chart_unavailability,
+        "latency_vs_throughput": chart_latency_vs_throughput,
     }
 
     parser = argparse.ArgumentParser()
