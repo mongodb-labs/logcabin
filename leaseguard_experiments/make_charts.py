@@ -14,7 +14,7 @@ _logger = logging.getLogger("chart")
 _this_dir = os.path.dirname(__file__)
 
 
-def chart_network_latency():
+def chart_network_latency(args: argparse.Namespace):
     csv = pd.read_csv(f"{_this_dir}/network_latency_experiment.csv")
     fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, sharex=True, figsize=(5, 6))
 
@@ -180,7 +180,7 @@ def chart_network_latency():
     _logger.info(f"Created {chart_path}")
 
 
-def chart_unavailability():
+def chart_unavailability(args: argparse.Namespace):
     from unavailability_experiment import (
         OPTIONS,
         ELECTION_TIMEOUT_MS,
@@ -314,7 +314,7 @@ def chart_unavailability():
     _logger.info(f"Created {chart_path}")
 
 
-def chart_latency_vs_throughput():
+def chart_latency_vs_throughput(args: argparse.Namespace):
     """Plot latency (p50) vs throughput with one subplot per configuration.
 
     Each subplot corresponds to one configuration (the first five boolean
@@ -365,10 +365,15 @@ def chart_latency_vs_throughput():
         for i, (group_vars, config_name) in enumerate(names.items()):
             group_df = grouped[(write_ratio,) + group_vars]
             ax_i = axes[i]
-            ax_i.set_yscale("log")
-            ax_i.set_ylim(0.04, 1000)
-            ax_i.set_yticks([0.1, 1, 10, 100, 1000])
-            ax_i.set_yticklabels(["0.1", "1", "10", "100", "1000"])
+            # ax_i.set_yscale("log")
+            if write_ratio == 0.0:
+                ax_i.set_ylim(0, 0.3)
+                yticks = [0, 0.1, 0.2, 0.3]
+            else:
+                ax_i.set_ylim(0, 10)
+                yticks = range(0, 11, 2)
+            ax_i.set_yticks(list(yticks))
+            ax_i.set_yticklabels([str(v) for v in yticks])
             ax_i.yaxis.grid = ax_i.xaxis.grid = lambda *args, **kwargs: None
             ax_i.plot(
                 group_df["total_ops_per_sec"],
@@ -380,16 +385,18 @@ def chart_latency_vs_throughput():
             )
             if i == 0:
                 fig.suptitle(f"{int(write_ratio * 100)}% write ratio", y=0.99, fontsize=14)
-            # Add a small label next to each point with its (x, y) rounded to int.
-            # for xi, yi in zip(group_df["total_ops_per_sec"], group_df["combined_p50_ms"]):
-            #     ax_i.annotate(
-            #         f"{int(round(xi))},{int(round(yi))}",
-            #         xy=(xi, yi),
-            #         xytext=(3, 3),
-            #         textcoords="offset points",
-            #         fontsize=8,
-            #         zorder=4,
-            #     )
+            
+            if args.labels:
+                # Add a small label next to each point with its (x, y) rounded to int.
+                for xi, yi in zip(group_df["total_ops_per_sec"], group_df["combined_p50_ms"]):
+                    ax_i.annotate(
+                        f"{int(round(xi))},{int(round(yi))}",
+                        xy=(xi, yi),
+                        xytext=(3, 3),
+                        textcoords="offset points",
+                        fontsize=8,
+                        zorder=4,
+                    )
 
             # interior label
             ax_i.text(
@@ -439,6 +446,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("charts", nargs="*", help=f"Which charts to make: {','.join(chart_funcs)}")
+    parser.add_argument("--labels", 
+                        action="store_true", help="Whether to add data labels to points.")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -453,4 +462,4 @@ if __name__ == "__main__":
 
     for chart_name, chart_func in chart_funcs.items():
         if chart_name in args.charts or args.charts == []:
-            chart_funcs[chart_name]()
+            chart_funcs[chart_name](args)
