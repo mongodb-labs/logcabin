@@ -239,24 +239,40 @@ def chart_unavailability(args: argparse.Namespace):
     }
     fig, axes = plt.subplots(len(OPTIONS), 1, sharex=True, sharey=False, figsize=(5, 8))
     axes[-1].set(xlabel=r"time in milliseconds $\rightarrow$")
+    label_font_size = 12
 
     for i, (name, df) in enumerate(dfs.items()):
         ax = axes[i]
         options = OPTIONS[name]
         x_min = df["time_bin"].min()
+        y_lim = options.reads_per_ms * 2.1 * 1000  # ops/sec
         for spine in ax.spines.values():
             spine.set_linewidth(0.5)
 
-        if len(df) > 0:
-            for column in ["reads", "writes"]:
-                ax.plot(
-                    (df["time_bin"] - x_min) / 1_000_000,
-                    df[column] * 1000,  # Convert ops/ms to ops/second
-                    label=column,
-                    linewidth=1,
-                )
-                ax.set_ylim(0, options.reads_per_ms * 2.1 * 1000)  # ops/sec
-                ax.set_xlim(100, 1900)
+        for column in ["reads", "writes"]:
+            ax.plot(
+                (df["time_bin"] - x_min) / 1_000_000,
+                df[column] * 1000,  # Convert ops/ms to ops/second
+                label=column,
+                linewidth=1,
+            )
+            ax.set_ylim(0, y_lim)
+            ax.set_xlim(100, 1900)
+
+        # Defer commit lets write throughput spike off the chart when old lease expires.
+        if options.deferCommitEnabled:
+            # Get the first off-chart value
+            off_chart_writes = df[df["writes"] * 1000 > y_lim]
+            off_chart_value = off_chart_writes["writes"].iloc[0] * 1000
+            off_chart_time = off_chart_writes.index[0]
+            # Place text label just below the top of the subplot.
+            ax.text(off_chart_time - 65, y_lim + 9500,
+                    f"off chart, {off_chart_value/1000:.0f}k ops/sec",
+                    ha="right", va="top",
+                    fontsize=label_font_size)
+            ax.text(off_chart_time - 75, y_lim + 6500,
+                    r"$\searrow$",
+                    ha="left", va="top")
 
         # Leader crash.
         ax.axvline(x=KILL_LEADER_TIME_MS, color="red", linestyle="dotted")
@@ -284,7 +300,6 @@ def chart_unavailability(args: argparse.Namespace):
             transform=ax.transAxes,
         )
 
-    label_font_size = 10
     EVENT_LABEL_HEIGHT = 20000
     axes[0].text(510,
                  EVENT_LABEL_HEIGHT,
