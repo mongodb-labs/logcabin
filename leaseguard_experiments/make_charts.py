@@ -237,7 +237,7 @@ def chart_unavailability(args: argparse.Namespace):
         name: resample_data(i, options)
         for i, (name, options) in enumerate(OPTIONS.items())
     }
-    fig, axes = plt.subplots(len(OPTIONS), 1, sharex=True, sharey=False, figsize=(5, 6))
+    fig, axes = plt.subplots(len(OPTIONS), 1, sharex=True, sharey=False, figsize=(5, 8))
     axes[-1].set(xlabel=r"time in milliseconds $\rightarrow$")
 
     for i, (name, df) in enumerate(dfs.items()):
@@ -251,11 +251,12 @@ def chart_unavailability(args: argparse.Namespace):
             for column in ["reads", "writes"]:
                 ax.plot(
                     (df["time_bin"] - x_min) / 1_000_000,
-                    df[column],
+                    df[column] * 1000,  # Convert ops/ms to ops/second
                     label=column,
-                    linewidth=0.75,
+                    linewidth=1,
                 )
-                ax.set_ylim(0, options.reads_per_ms * 2.5)
+                ax.set_ylim(0, options.reads_per_ms * 2.1 * 1000)  # ops/sec
+                ax.set_xlim(100, 1900)
 
         # Leader crash.
         ax.axvline(x=KILL_LEADER_TIME_MS, color="red", linestyle="dotted")
@@ -284,30 +285,31 @@ def chart_unavailability(args: argparse.Namespace):
         )
 
     label_font_size = 10
+    EVENT_LABEL_HEIGHT = 20000
     axes[0].text(510,
-                 17,
+                 EVENT_LABEL_HEIGHT,
                  "$\\leftarrow$ leader\n    crash",
                  color="red",
                  fontsize=label_font_size)
     axes[1].text(570,
-                 1.7,  # the "quorum" chart's y-axis is short
+                 EVENT_LABEL_HEIGHT / 10,  # the "quorum" chart's y-axis is short
                  "new leader\nelected    $\\rightarrow$",
                  color="green",
                  fontsize=label_font_size)
     axes[2].text(1090,
-                 17,
+                 EVENT_LABEL_HEIGHT,
                  "old lease\nexpires  $\\rightarrow$ ",
                  color="purple",
                  fontsize=label_font_size)
     fig.legend(
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.005),
+        bbox_to_anchor=(0.5, 0.98),
         ncol=2,
         handles=[Line2D([0], [0], color=color) for color in ["C1", "C0"]],
         labels=["writes", "reads"],
         frameon=False, # remove border
     )
-    fig.text(0.002, 0.5, "operations per millisecond", va="center", rotation="vertical")
+    fig.text(0.002, 0.5, "operations per second", va="center", rotation="vertical")
     fig.tight_layout()
     fig.subplots_adjust(hspace=0.4, top=0.92)
     chart_path = f"{_this_dir}/unavailability_experiment_logcabin.pdf"
@@ -364,14 +366,14 @@ def chart_latency_vs_throughput(args: argparse.Namespace):
     for write_ratio in sorted(pivot["write_ratio"].unique()):
         fig, ax = plt.subplots(1, 1, sharex=True, figsize=(8, 3.5))
         # ax.set_yscale("log")
-        if write_ratio == 0.0:
-            ax.set_ylim(0, 0.3)
-            yticks = [0, 0.1, 0.2, 0.3]
-        else:
-            ax.set_ylim(0, 10)
-            yticks = range(0, 11, 2)
-        ax.set_yticks(list(yticks))
-        ax.set_yticklabels([str(v) for v in yticks])
+        # if write_ratio == 0.0:
+        #     ax.set_ylim(0, 0.3)
+        #     yticks = [0, 0.1, 0.2, 0.3]
+        # else:
+        #     ax.set_ylim(0, 10)
+        #     yticks = range(0, 11, 2)
+        # ax.set_yticks(list(yticks))
+        # ax.set_yticklabels([str(v) for v in yticks])
 
         # Draw each configuration as a separate line on the same axes.
         for group_vars, config_name in names.items():
