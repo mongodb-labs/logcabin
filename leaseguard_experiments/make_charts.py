@@ -6,6 +6,7 @@ import matplotlib.font_manager as font_manager
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import matplotlib.ticker as ticker
 
@@ -14,47 +15,56 @@ _logger = logging.getLogger("chart")
 _this_dir = os.path.dirname(__file__)
 
 
+CONFIG_MARKERS = {
+    "inconsistent": "o",
+    "quorum": "s",
+    "Ongaro lease": "^",
+    "LeaseGuard": "D",
+}
+
+CONFIG_COLORS = {
+    "inconsistent": "C0",
+    "quorum": "C1",
+    "Ongaro lease": "C2",
+    "LeaseGuard": "C3",
+}
+
+
 def chart_network_latency(args: argparse.Namespace):
     csv = pd.read_csv(f"{_this_dir}/network_latency_experiment.csv")
-    fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, sharex=True, figsize=(5, 6))
 
-    ax4.set(xlabel="added one-way network latency (ms)")
+    # Two subplots: reads (top) and writes (bottom)
+    fig, (ax_read, ax_write) = plt.subplots(2, 1, sharex=False, figsize=(6, 6))
 
-    ax1.yaxis.set_major_locator(plt.MaxNLocator(nbins=3))
-    ax2.yaxis.set_major_locator(plt.MaxNLocator(nbins=3))
-    ax2.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: f'{int(x/1000)}k'))
-    ax3.yaxis.set_major_locator(plt.MaxNLocator(nbins=3))
-    ax4.yaxis.set_major_locator(plt.MaxNLocator(nbins=3))
+    ax_write.set(xlabel="added one-way network latency (ms)")
 
-    ax1.xaxis.set_major_locator(plt.NullLocator())
-    ax2.xaxis.set_major_locator(plt.NullLocator())
-    ax3.xaxis.set_major_locator(plt.NullLocator())
-    ax4.xaxis.set_major_locator(plt.MultipleLocator(1))
-
-    ax1.set_ylim(0, 24)
-    ax3.set_ylim(0, 24)
-    ax4.set_ylim(0, 24)
-    ax1.yaxis.set_major_locator(plt.MultipleLocator(10))
-    ax3.yaxis.set_major_locator(plt.MultipleLocator(10))
-    ax4.yaxis.set_major_locator(plt.MultipleLocator(10))
-    
-    for ax in [ax1, ax2, ax3, ax4]:
-        ax.yaxis.grid(True, which='both', linestyle='--', linewidth=0.5)
+    for ax in (ax_read, ax_write):
+        ax.xaxis.set_major_locator(plt.MultipleLocator(1))
+        ax.yaxis.set_major_locator(plt.MultipleLocator(10))
+        ax.set_yscale("log")
+        ax.set_ylim(1, 20_000)
+        # Disable horizontal grid lines for clarity on log scale
+        ax.yaxis.grid(False)
         ax.set_axisbelow(True)
+        # Format y-axis ticks as plain integers (e.g., 100 instead of 1e2).
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda y, pos: f"{int(round(y))}"))
+        # Remove minor ticks on y axis
+        ax.yaxis.set_minor_locator(ticker.NullLocator())
+        ax.minorticks_off()
+        for spine in ax.spines.values():
+            spine.set_linewidth(0.5)
 
-    # x-offset, color, config_name, operation_type, axes
-    combos = [
-        (-0.25, "C1", "inconsistent", "write", ax1),
-        (0.25, "C0", "inconsistent", "read", ax1),
-        (-0.25, "C1", "quorum", "write", ax2),
-        (0.25, "C0", "quorum", "read", ax2),
-        (-0.25, "C1", "Ongaro lease", "write", ax3),
-        (0.25, "C0", "Ongaro lease", "read", ax3),
-        (-0.25, "C1", "LeaseGuard", "write", ax4),
-        (0.25, "C0", "LeaseGuard", "read", ax4),
-    ]
+    column = "p90latencyNanos"
 
-    for offset, color, config_name, operationType, ax in combos:
+    # Prepare offsets so bars for different configs don't overlap
+    n_configs = len(CONFIG_MARKERS)
+    total_width = 0.8
+    bar_width = total_width / n_configs
+    offsets = np.linspace(-total_width / 2 + bar_width / 2, 
+                          total_width / 2 - bar_width / 2, n_configs)
+
+    # For each config, compute grouped p90 and plot on respective axes
+    for i, config_name in enumerate(CONFIG_MARKERS):
         if config_name == "inconsistent":
             config_predicate = (csv["quorumCheckOnRead"] == False) & (
                 csv["leaseGuardEnabled"] == False
@@ -68,12 +78,11 @@ def chart_network_latency(args: argparse.Namespace):
         else:
             config_predicate = csv["leaseGuardEnabled"]
 
-        op_predicate = csv["operationType"] == operationType
-        column = "p90latencyNanos"
-        df = (
-            csv[config_predicate & op_predicate]
-            .groupby(
-                [
+        for ax, op in ((ax_read, "read"), (ax_write, "write")):
+            op_predicate = csv["operationType"] == op
+            df = (
+                csv[config_predicate & op_predicate]
+                .groupby([
                     "latencyMs",
                     "operationType",
                     "quorumCheckOnRead",
@@ -84,97 +93,53 @@ def chart_network_latency(args: argparse.Namespace):
                     "size",
                     "threads",
                     "operations",
-                ]
-            )[column]
-            .mean()
-            .reset_index()
-        )
+                ])[column]
+                .mean()
+                .reset_index()
+            )
 
-        hatch = "//" if operationType == "write" else "xx"
-
-        # The x-axis "latencyMs" is the artificially added network latency.
-        x = df["latencyMs"] + offset
-        # convert nanos to millis and ensure min height of 1
-        y = df[column].apply(lambda x: max(x / 1_000_000, 1))
-        # Draw hatch only.
-        ax.bar(
-            x,
-            y,
-            label=f"{config_name} {operationType}",
-            color="none",
-            width=0.3,
-            edgecolor=color,
-            hatch=hatch,
-            facecolor="none",
-            linewidth=0.5,
-            zorder=2,
-        )
-        # Draw the edge.
-        ax.bar(
-            x,
-            y,
-            color="none",
-            width=0.3,
-            edgecolor="black",
-            facecolor="none",
-            linewidth=0.5,
-            zorder=3,
-        )
-        # Add config_name to the upper left interior of each subplot
-        ax.text(
-            0.02, 0.7, config_name,
-            transform=ax.transAxes,
-            verticalalignment='top',
-            horizontalalignment='left',
-            fontsize=12,
-        )
-
-    # Draw hatch only.
-    fig.legend(
-        loc="upper center",
-        ncol=2,
-        handles=[
-            Patch(
-                facecolor="none",
-                edgecolor="C1",
-                label="write latency p90",
-                hatch="//",
-                linewidth=0.5,
-            ),
-            Patch(
-                facecolor="none",
-                edgecolor="C0",
-                label="read latency p90",
-                hatch="xx",
-                linewidth=0.5,
-            ),
-        ],
-        frameon=False,
-    )
-    # Draw edges.
-    fig.legend(
-        loc="upper center",
-        ncol=2,
-        handles=[
-            Patch(
-                facecolor="none",
+            x = df["latencyMs"] + offsets[i]
+            # Make a minimum height for visibility.
+            y = df[column].apply(lambda x: max(x / 1_000_000, 1.5))
+            ax.bar(
+                x,
+                y,
+                width=bar_width,
+                color=CONFIG_COLORS.get(config_name, None),
                 edgecolor="black",
-                label="write latency p90",
-                linewidth=0.5,
-            ),
-            Patch(
-                facecolor="none",
-                edgecolor="black",
-                label="read latency p90",
-                linewidth=0.5,
-            ),
-        ],
-        frameon=False,
-        labelcolor="none",
+                label=config_name if op == "read" else None,
+                zorder=2,
+            )
+
+    # Add subplot labels on the left
+    ax_read.text(
+        -0.12,
+        0.5,
+        "p90 read latency (ms)",
+        transform=ax_read.transAxes,
+        verticalalignment='center',
+        horizontalalignment='center',
+        rotation='vertical',
     )
+    ax_write.text(
+        -0.12,
+        0.5,
+        "p90 write latency (ms)",
+        transform=ax_write.transAxes,
+        verticalalignment='center',
+        horizontalalignment='center',
+        rotation='vertical',
+    )
+
+    # Build legend from config colors (showing config color boxes)
+    legend_handles = [
+        Patch(facecolor=CONFIG_COLORS[name], edgecolor="black", label=name)
+        for name in CONFIG_MARKERS
+    ]
+    fig.legend(legend_handles, CONFIG_MARKERS, loc="upper center", ncol=4, frameon=False)
 
     fig.tight_layout()
-    fig.subplots_adjust(top=0.9)
+    fig.subplots_adjust(top=0.9, hspace=0.15)
     chart_path = f"{_this_dir}/network_latency_experiment_logcabin.pdf"
     fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
     _logger.info(f"Created {chart_path}")
@@ -376,13 +341,7 @@ def chart_latency_vs_throughput(args: argparse.Namespace):
         for group_vars, config_name in names.items():
             key = (write_ratio,) + group_vars
             group_df = grouped[key]
-            markers = {
-                "inconsistent": "o",
-                "quorum": "s",
-                "Ongaro lease": "^",
-                "LeaseGuard": "D",
-            }
-            marker = markers.get(config_name, "o")
+            marker = CONFIG_MARKERS.get(config_name, "o")
             ax.plot(
                 group_df["total_ops_per_sec"],
                 group_df["combined_p50_ms"],
@@ -448,6 +407,10 @@ if __name__ == "__main__":
     parser.add_argument("--labels", 
                         action="store_true", help="Whether to add data labels to points.")
     args = parser.parse_args()
+    for chart_name in args.charts:
+        if chart_name not in chart_funcs:
+            raise ValueError(
+                f"Unknown chart name {chart_name}, must be one of {list(chart_funcs.keys())}")
 
     logging.basicConfig(level=logging.INFO)
     plt.rcParams.update({"font.size": 12})
