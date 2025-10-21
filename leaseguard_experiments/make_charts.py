@@ -173,6 +173,7 @@ def chart_network_latency(args: argparse.Namespace):
         labelcolor="none",
     )
 
+    fig.text(0.002, 0.5, "p90 latency (ms)", va="center", rotation="vertical")
     fig.tight_layout()
     fig.subplots_adjust(top=0.9)
     chart_path = f"{_this_dir}/network_latency_experiment_logcabin.pdf"
