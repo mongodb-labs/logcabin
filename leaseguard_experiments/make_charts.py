@@ -361,35 +361,41 @@ def chart_latency_vs_throughput(args: argparse.Namespace):
     # Group by configurations (first five keys).
     grouped = dict(list(pivot.groupby(["write_ratio"] + list(config_keys))))
     for write_ratio in sorted(pivot["write_ratio"].unique()):
-        fig, axes = plt.subplots(len(names), 1, sharex=True, figsize=(6, 1.6 * len(names)))
-        for i, (group_vars, config_name) in enumerate(names.items()):
-            group_df = grouped[(write_ratio,) + group_vars]
-            ax_i = axes[i]
-            # ax_i.set_yscale("log")
-            if write_ratio == 0.0:
-                ax_i.set_ylim(0, 0.3)
-                yticks = [0, 0.1, 0.2, 0.3]
-            else:
-                ax_i.set_ylim(0, 10)
-                yticks = range(0, 11, 2)
-            ax_i.set_yticks(list(yticks))
-            ax_i.set_yticklabels([str(v) for v in yticks])
-            ax_i.yaxis.grid = ax_i.xaxis.grid = lambda *args, **kwargs: None
-            ax_i.plot(
+        fig, ax = plt.subplots(1, 1, sharex=True, figsize=(8, 3.5))
+        # ax.set_yscale("log")
+        if write_ratio == 0.0:
+            ax.set_ylim(0, 0.3)
+            yticks = [0, 0.1, 0.2, 0.3]
+        else:
+            ax.set_ylim(0, 10)
+            yticks = range(0, 11, 2)
+        ax.set_yticks(list(yticks))
+        ax.set_yticklabels([str(v) for v in yticks])
+
+        # Draw each configuration as a separate line on the same axes.
+        for group_vars, config_name in names.items():
+            key = (write_ratio,) + group_vars
+            group_df = grouped[key]
+            markers = {
+                "inconsistent": "o",
+                "quorum": "s",
+                "Ongaro lease": "^",
+                "LeaseGuard": "D",
+            }
+            marker = markers.get(config_name, "o")
+            ax.plot(
                 group_df["total_ops_per_sec"],
                 group_df["combined_p50_ms"],
-                linewidth=0.75,
-                marker="o",
-                markersize=3,
+                linewidth=0.9,
+                marker=marker,
+                markersize=5,
+                markeredgewidth=0.5,
                 zorder=2,
+                label=config_name,
             )
-            if i == 0:
-                fig.suptitle(f"{int(write_ratio * 100)}% write ratio", y=0.99, fontsize=14)
-            
             if args.labels:
-                # Add a small label next to each point with its (x, y) rounded to int.
                 for xi, yi in zip(group_df["total_ops_per_sec"], group_df["combined_p50_ms"]):
-                    ax_i.annotate(
+                    ax.annotate(
                         f"{int(round(xi))},{int(round(yi))}",
                         xy=(xi, yi),
                         xytext=(3, 3),
@@ -398,43 +404,36 @@ def chart_latency_vs_throughput(args: argparse.Namespace):
                         zorder=4,
                     )
 
-            # interior label
-            ax_i.text(
-                0.02, 0.7, 
-                config_name,
-                transform=ax_i.transAxes,
-                verticalalignment='top',
-                horizontalalignment='left',
-                fontsize=12,
-            )
+        ax.yaxis.grid(True, which="both", linestyle="--", linewidth=0.5)
+        ax.set_axisbelow(True)
+        for spine in ax.spines.values():
+            spine.set_linewidth(0.5)
 
-            ax_i.yaxis.grid(True, which="both", linestyle="--", linewidth=0.5)
-            ax_i.set_axisbelow(True)
-            for spine in ax_i.spines.values():
-                spine.set_linewidth(0.5)
+        ax.set(xlabel="actual throughput (ops/sec)")
+        ax.set_ylabel("average latency (ms)")
+        fig.suptitle(f"{int(write_ratio * 100)}% write ratio", y=0.99, fontsize=14)
 
-        axes[-1].set(xlabel="actual throughput (ops/sec)")
-        axes[0].set_ylabel("average latency (ms)")
-
-        # Legend for write ratios at the top
-        handles, labels = axes[0].get_legend_handles_labels()
+        # Legend for configurations at the top
+        handles, labels = ax.get_legend_handles_labels()
         if handles:
-            fig.legend(handles, labels, loc="upper center", ncol=5, frameon=False)
+            fig.legend(handles, labels, loc="upper center", ncol=min(len(labels), 4), frameon=False)
 
         fig.tight_layout()
-        fig.subplots_adjust(top=0.92, hspace=0.4)
+        fig.subplots_adjust(top=0.88)
         chart_path = f"{_this_dir}/latency_vs_throughput_experiment_logcabin_{write_ratio}.pdf"
         fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
         _logger.info(f"Created {chart_path}")
 
+        # Export CSV containing all configurations for this write_ratio.
         csv_rows = []
         for group_vars, group_df in grouped.items():
             if group_vars[0] == write_ratio:
                 csv_rows.append(group_df)
-        df_out = pd.concat(csv_rows, ignore_index=True)
-        csv_path = chart_path.replace(".pdf", ".csv")
-        df_out.to_csv(csv_path, index=False)
-        _logger.info(f"Created {csv_path}")
+        if csv_rows:
+            df_out = pd.concat(csv_rows, ignore_index=True)
+            csv_path = chart_path.replace(".pdf", ".csv")
+            df_out.to_csv(csv_path, index=False)
+            _logger.info(f"Created {csv_path}")
 
 
 if __name__ == "__main__":
