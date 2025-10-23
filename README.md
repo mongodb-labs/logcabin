@@ -113,7 +113,7 @@ Only needed on the client, since we'll share it over sshfs with the servers, bel
 
 ```
 cd
-git clone git@github.com:mongodb-labs/logcabin.git
+git clone git@github.com:<ANONYMIZED>/logcabin.git
 cd logcabin
 git checkout --track origin/leaseguard
 git submodule update --init

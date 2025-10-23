@@ -325,7 +325,7 @@ MessageSocket::read(void* buf, size_t maxBytes)
     if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
         return 0;
     
-    // EBADF and others arise from Jesse's async rewrite.
+    // EBADF and others arise from my async rewrite.
     WARNING("Error while reading from socket fd %u: %s", receiveSocket.fd, strerror(errno));
     return -1;
 }
