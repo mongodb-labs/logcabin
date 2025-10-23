@@ -145,7 +145,6 @@ treeCall(LeaderRPCBase& leaderRPC,
             VERBOSE("Timeout elapsed on read-only tree query");
             break;
         case LeaderRPC::Status::INVALID_REQUEST:
-            // HACK (Jesse): This could simply be a server that doesn't have a lease.
             response.set_status(Protocol::Client::Status::UNKNOWN);
             break;
     }
