@@ -355,7 +355,8 @@ def chart_latency_vs_throughput(args: argparse.Namespace):
         (False, False, True, True, True): "LeaseGuard",
     }
 
-    write_ratios = [0.0, 0.25, 0.5]
+    write_ratios = csv["write_ratio"].unique()
+    write_ratios.sort()
 
     # Prepare data for all subplots first so we can determine global y-limits.
     # write_ratio -> list of (config_name, rows) where rows = [(throughput, latency), ...]
