@@ -414,7 +414,7 @@ def chart_latency_vs_throughput(args: argparse.Namespace):
     yticks = [10 ** e for e in range(exp_min, exp_max + 1)]
 
     # Create vertically stacked subplots, share x axis
-    fig, axes = plt.subplots(len(write_ratios), 1, sharex=True, figsize=(8, 9))
+    fig, axes = plt.subplots(len(write_ratios), 1, sharex=True, figsize=(5, 8))
     if len(write_ratios) == 1:
         axes = [axes]
 
@@ -450,7 +450,7 @@ def chart_latency_vs_throughput(args: argparse.Namespace):
                 linewidth=0.9,
                 marker=markers[name],
                 color=colors[name],
-                markersize=8,
+                markersize=7,
                 markeredgewidth=0.5,
                 zorder=2,
                 label=name,
@@ -467,20 +467,35 @@ def chart_latency_vs_throughput(args: argparse.Namespace):
                     )
 
         ax.set_ylabel("average latency (ms)")
-        ax.set_title(f"{int(write_ratio * 100)}% write ratio", fontsize=12, loc="center")
+        if write_ratio == 0:
+            title = "read-only"
+        else:
+            title = f"{int(write_ratio * 100)}% writes"
+        ax.set_title(title, fontsize=12, loc="center")
 
     # Shared x label on the bottom subplot
     axes[-1].set_xlabel("actual throughput (ops/sec)")
 
     # Create a single legend for the figure using the known config names & markers
     legend_handles = [
-        Line2D([], [], color=colors[n], marker=markers[n], markersize=10, linestyle="None", 
+        Line2D([], [], color=colors[n], marker=markers[n], markersize=7, linestyle="None", 
                markeredgewidth=0.5) for n in names.values()]
-    fig.legend(legend_handles, list(names.values()), loc="upper center",
-               bbox_to_anchor=(0.5, 0.98), ncol=len(names), frameon=True)
+    fig.legend(
+        legend_handles,
+        list(names.values()),
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.98),
+        ncol=len(names),
+        frameon=True,
+        handlelength=1.0,
+        handletextpad=0.3,
+        columnspacing=0.6,
+        borderpad=0.3,
+        labelspacing=0.2,
+    )
     fig.tight_layout()
     fig.subplots_adjust(top=0.9, hspace=0.3)
-    chart_path = f"{_this_dir}/latency_vs_throughput_experiment_logcabin_combined.pdf"
+    chart_path = f"{_this_dir}/latency_vs_throughput_experiment_logcabin.pdf"
     fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
     _logger.info(f"Created {chart_path}")
 
