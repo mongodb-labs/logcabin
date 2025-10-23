@@ -438,10 +438,9 @@ def chart_latency_vs_throughput(args: argparse.Namespace):
         ax.set_yticks(yticks)
         ax.set_yticklabels([str(int(v)) if v >= 1 else str(v) for v in yticks])
         ax.yaxis.set_minor_locator(ticker.NullLocator())
-        ax.yaxis.grid(False)
         ax.set_axisbelow(True)
-        for spine in ax.spines.values():
-            spine.set_linewidth(0.5)
+        ax.yaxis.grid(True, which='major', linestyle='--', linewidth=0.5)
+        ax.xaxis.grid(True, which='major', linestyle='--', linewidth=0.5)
 
         # draw each config's line
         for name, rows in prepared[write_ratio]:
@@ -451,7 +450,7 @@ def chart_latency_vs_throughput(args: argparse.Namespace):
                 linewidth=0.9,
                 marker=markers[name],
                 color=colors[name],
-                markersize=5,
+                markersize=8,
                 markeredgewidth=0.5,
                 zorder=2,
                 label=name,
@@ -475,9 +474,10 @@ def chart_latency_vs_throughput(args: argparse.Namespace):
 
     # Create a single legend for the figure using the known config names & markers
     legend_handles = [
-        Line2D([], [], color=colors[n], marker=markers[n], linestyle="None", markeredgewidth=0.5)
-        for n in names.values()]
-    fig.legend(legend_handles, colors, loc="upper center", ncol=len(names), frameon=False)
+        Line2D([], [], color=colors[n], marker=markers[n], markersize=10, linestyle="None", 
+               markeredgewidth=0.5) for n in names.values()]
+    fig.legend(legend_handles, list(names.values()), loc="upper center",
+               bbox_to_anchor=(0.5, 0.98), ncol=len(names), frameon=True)
     fig.tight_layout()
     fig.subplots_adjust(top=0.9, hspace=0.3)
     chart_path = f"{_this_dir}/latency_vs_throughput_experiment_logcabin_combined.pdf"

@@ -127,7 +127,7 @@ if __name__ == "__main__":
         (False, True, False, False, False), # ongaro lease
         (False, False, True, True, True), # leaseguard with optimizations
     ]:
-        for kilo_ops_per_sec in range(5, 85, 5):
+        for kilo_ops_per_sec in range(5, 65, 5):
             for write_ratio in (0, 0.25, 0.5, 0.75):
                 operations = EXPERIMENT_DURATION_SEC * kilo_ops_per_sec * 1000
                 writes = int(operations * write_ratio)
