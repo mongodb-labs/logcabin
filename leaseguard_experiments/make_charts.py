@@ -1,12 +1,14 @@
 import argparse
 import logging
 import os.path
+from collections import defaultdict
 
 import matplotlib.font_manager as font_manager
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 import pandas as pd
+import math
 import matplotlib.ticker as ticker
 
 
@@ -333,21 +335,19 @@ def chart_unavailability(args: argparse.Namespace):
 
 
 def chart_latency_vs_throughput(args: argparse.Namespace):
-    """Plot latency (p50) vs throughput with one subplot per configuration.
-
-    Each subplot corresponds to one configuration (the first five boolean
-    options). Within a subplot we draw a separate line per write ratio.
+    """Plot latency (p50) vs throughput with three vertically stacked subplots
+    for write ratios 0, 0.25, and 0.5. All subplots share the x-axis and use the
+    same y-axis limits determined from the data.
     """
     csv = pd.read_csv(f"{_this_dir}/latency_vs_throughput_experiment.csv")
     csv["write_ratio"] = csv["writes"] / (csv["reads"] + csv["writes"])
-    config_keys = (
+    config_column_names = (
         "quorumCheckOnRead",
         "ongaroLeaseEnabled",
         "leaseGuardEnabled",
         "deferCommitEnabled",
         "inheritLeaseEnabled",
     )
-
     names = {
         (False, False, False, False, False): "inconsistent",
         (True, False, False, False, False): "quorum",
@@ -355,64 +355,109 @@ def chart_latency_vs_throughput(args: argparse.Namespace):
         (False, False, True, True, True): "LeaseGuard",
     }
 
-    # Mean per trial (grouping by config keys + reads/writes to pair read/write rows).
-    mean_per_trial = (
-        csv.groupby(list(config_keys) + ["write_ratio", "reads", "writes", "operationType"])
-        [["opsPerSec", "p50latencyNanos"]].mean().reset_index())
+    write_ratios = [0.0, 0.25, 0.5]
 
-    # Pivot read/write into columns.
-    pivot = mean_per_trial.pivot_table(
-        index=list(config_keys) + ["write_ratio", "reads", "writes"],
-        columns="operationType",
-        values=["opsPerSec", "p50latencyNanos"])
-    pivot.columns = [f"{v}_{k}" for v, k in pivot.columns]
-    pivot = pivot.reset_index()
+    # Prepare data for all subplots first so we can determine global y-limits.
+    # write_ratio -> list of (config_name, rows) where rows = [(throughput, latency), ...]
+    prepared = {}
+    all_latencies = []
 
-    # Compute combined throughput and weighted p50 (ms)
-    pivot["total_ops_per_sec"] = pivot["opsPerSec_read"] + pivot["opsPerSec_write"]
-    pivot["combined_p50_ms"] = (
-        (pivot["p50latencyNanos_read"] * pivot["opsPerSec_read"]
-         + pivot["p50latencyNanos_write"] * pivot["opsPerSec_write"])
-        / pivot["total_ops_per_sec"]
-    ) / 1_000_000.0
+    for write_ratio in write_ratios:
+        wr_df = csv[csv["write_ratio"] == write_ratio].copy()
+        prepared[write_ratio] = []
+        # Each configuration (grouped by the five boolean keys) produces one line.
+        for config_keys, df in list(wr_df.groupby(list(config_column_names))):
+            name = names[tuple(config_keys)]
+            offered_load2latency_and_throughput = defaultdict(list)
+            # Each trial makes two rows: one for reads, one for writes.
+            for i in range(0, len(df), 2):
+                if df.iloc[i]["operationType"] == "read":
+                    read_i, write_i = i, i + 1
+                else:
+                    read_i, write_i = i + 1, i
+                actual_reads = df.iloc[read_i]["opsPerSec"]
+                read_p50 = df.iloc[read_i]["p50latencyNanos"] / 1_000_000.0
+                actual_writes = df.iloc[write_i]["opsPerSec"]
+                write_p50 = df.iloc[write_i]["p50latencyNanos"] / 1_000_000.0
+                assert(actual_reads + actual_writes > 0)
+                combined_p50 = (
+                    (read_p50 * actual_reads + write_p50 * actual_writes)
+                    / (actual_reads + actual_writes))
+                offered_load = df.iloc[read_i]["reads"] + df.iloc[write_i]["writes"]
+                offered_load2latency_and_throughput[offered_load].append(
+                    (combined_p50, actual_reads + actual_writes)
+                )
 
-    # Group by configurations (first five keys).
-    grouped = dict(list(pivot.groupby(["write_ratio"] + list(config_keys))))
-    for write_ratio in sorted(pivot["write_ratio"].unique()):
-        fig, ax = plt.subplots(1, 1, sharex=True, figsize=(8, 3.5))
-        # ax.set_yscale("log")
-        # if write_ratio == 0.0:
-        #     ax.set_ylim(0, 0.3)
-        #     yticks = [0, 0.1, 0.2, 0.3]
-        # else:
-        #     ax.set_ylim(0, 10)
-        #     yticks = range(0, 11, 2)
-        # ax.set_yticks(list(yticks))
-        # ax.set_yticklabels([str(v) for v in yticks])
+            rows = []
+            for offered_load, lat_and_throughputs in offered_load2latency_and_throughput.items():
+                lat_and_throughputs.sort(key=lambda x: x[0])  # sort by latency
+                if len(lat_and_throughputs) >= 3:
+                    # Remove outliers.
+                    lat_and_throughputs.pop(0)
+                    lat_and_throughputs.pop(-1)
+                throughput = sum(x[1] for x in lat_and_throughputs) / len(lat_and_throughputs)
+                latency = sum(x[0] for x in lat_and_throughputs) / len(lat_and_throughputs)
+                rows.append((throughput, latency))
+                all_latencies.append(latency)
+                if latency > 100:
+                    # Stop at the knee.
+                    break
 
-        # Draw each configuration as a separate line on the same axes.
-        for group_vars, config_name in names.items():
-            key = (write_ratio,) + group_vars
-            group_df = grouped[key]
-            markers = {
-                "inconsistent": "o",
-                "quorum": "s",
-                "Ongaro lease": "^",
-                "LeaseGuard": "D",
-            }
-            marker = markers.get(config_name, "o")
+            prepared[write_ratio].append((name, rows))
+
+    # Determine global y-limits from collected latencies
+    y_min = 0.03
+    y_max = max(0.1, max(all_latencies) * 1.1)
+    # Expand to nice powers of ten for log scale ticks
+    exp_min = math.ceil(math.log10(y_min))
+    exp_max = math.ceil(math.log10(y_max))
+    yticks = [10 ** e for e in range(exp_min, exp_max + 1)]
+
+    # Create vertically stacked subplots, share x axis
+    fig, axes = plt.subplots(len(write_ratios), 1, sharex=True, figsize=(8, 9))
+    if len(write_ratios) == 1:
+        axes = [axes]
+
+    markers = {
+        "inconsistent": "o",
+        "quorum": "s",
+        "Ongaro lease": "^",
+        "LeaseGuard": "D",
+    }
+    colors = {
+        "inconsistent": "C0",
+        "quorum": "C1",
+        "Ongaro lease": "C2",
+        "LeaseGuard": "C3",
+    }
+
+    # Plot each subplot
+    for ax, write_ratio in zip(axes, write_ratios):
+        ax.set_yscale("log")
+        ax.set_ylim(y_min, y_max)
+        ax.set_yticks(yticks)
+        ax.set_yticklabels([str(int(v)) if v >= 1 else str(v) for v in yticks])
+        ax.yaxis.set_minor_locator(ticker.NullLocator())
+        ax.yaxis.grid(False)
+        ax.set_axisbelow(True)
+        for spine in ax.spines.values():
+            spine.set_linewidth(0.5)
+
+        # draw each config's line
+        for name, rows in prepared[write_ratio]:
             ax.plot(
-                group_df["total_ops_per_sec"],
-                group_df["combined_p50_ms"],
+                [r[0] for r in rows],
+                [r[1] for r in rows],
                 linewidth=0.9,
-                marker=marker,
+                marker=markers[name],
+                color=colors[name],
                 markersize=5,
                 markeredgewidth=0.5,
                 zorder=2,
-                label=config_name,
+                label=name,
             )
             if args.labels:
-                for xi, yi in zip(group_df["total_ops_per_sec"], group_df["combined_p50_ms"]):
+                for xi, yi in rows:
                     ax.annotate(
                         f"{int(round(xi))},{int(round(yi))}",
                         xy=(xi, yi),
@@ -422,36 +467,22 @@ def chart_latency_vs_throughput(args: argparse.Namespace):
                         zorder=4,
                     )
 
-        ax.yaxis.grid(True, which="both", linestyle="--", linewidth=0.5)
-        ax.set_axisbelow(True)
-        for spine in ax.spines.values():
-            spine.set_linewidth(0.5)
-
-        ax.set(xlabel="actual throughput (ops/sec)")
         ax.set_ylabel("average latency (ms)")
-        fig.suptitle(f"{int(write_ratio * 100)}% write ratio", y=0.99, fontsize=14)
+        ax.set_title(f"{int(write_ratio * 100)}% write ratio", fontsize=12, loc="center")
 
-        # Legend for configurations at the top
-        handles, labels = ax.get_legend_handles_labels()
-        if handles:
-            fig.legend(handles, labels, loc="upper center", ncol=min(len(labels), 4), frameon=False)
+    # Shared x label on the bottom subplot
+    axes[-1].set_xlabel("actual throughput (ops/sec)")
 
-        fig.tight_layout()
-        fig.subplots_adjust(top=0.88)
-        chart_path = f"{_this_dir}/latency_vs_throughput_experiment_logcabin_{write_ratio}.pdf"
-        fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
-        _logger.info(f"Created {chart_path}")
-
-        # Export CSV containing all configurations for this write_ratio.
-        csv_rows = []
-        for group_vars, group_df in grouped.items():
-            if group_vars[0] == write_ratio:
-                csv_rows.append(group_df)
-        if csv_rows:
-            df_out = pd.concat(csv_rows, ignore_index=True)
-            csv_path = chart_path.replace(".pdf", ".csv")
-            df_out.to_csv(csv_path, index=False)
-            _logger.info(f"Created {csv_path}")
+    # Create a single legend for the figure using the known config names & markers
+    legend_handles = [
+        Line2D([], [], color=colors[n], marker=markers[n], linestyle="None", markeredgewidth=0.5)
+        for n in names.values()]
+    fig.legend(legend_handles, colors, loc="upper center", ncol=len(names), frameon=False)
+    fig.tight_layout()
+    fig.subplots_adjust(top=0.9, hspace=0.3)
+    chart_path = f"{_this_dir}/latency_vs_throughput_experiment_logcabin_combined.pdf"
+    fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
+    _logger.info(f"Created {chart_path}")
 
 
 if __name__ == "__main__":
