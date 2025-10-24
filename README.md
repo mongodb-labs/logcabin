@@ -5,15 +5,164 @@ This is the LeaseGuard branch of the LogCabin repo. LeaseGuard is a new leader l
 changes on this branch include a prototype implementation of LeaseGuard on top of LogCabin, plus an
 implementation of Ongaro's lease protocol for comparison (Ongaro's thesis §6.4.1).
 
-To reproduce the charts in the LeaseGuard paper:
+## Instance setup
+
+First, set up 4 AWS EC2 instances (1 client, 3 servers). Ubuntu Server 24.04, 64-bit ARM, m7g.xlarge, all in one placement group. Install dependencies:
+
+```
+sudo apt install ubuntu-dbgsym-keyring
+echo "deb http://ddebs.ubuntu.com $(lsb_release -cs) main restricted universe multiverse
+deb http://ddebs.ubuntu.com $(lsb_release -cs)-updates main restricted universe multiverse
+deb http://ddebs.ubuntu.com $(lsb_release -cs)-proposed main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/ddebs.list
+sudo apt-get update
+sudo apt-get install -y libcrypto++-dev libcrypto++-doc libcrypto++-utils scons protobuf-compiler g++ libtbb-dev linux-headers-$(uname -r) make gcc gdb emacs zsh libstdc++6-dbgsym libc6-dbgsym linux-image-$(uname -r)-dbgsym python3-venv
+touch ~/.hushlogin
+sudo reboot 
+```
+
+Enable ssh passwordless auth among the four nodes by generating a key pair and installing it in `~/.ssh` on all of them and configuring `~/.ssh/config` and `~/.ssh/authorized_keys` (exercise for the reader).
+
+## Tightly synchronized clocks
+
+Do the following on all four nodes. [Instructions inspired by Yugabyte](https://www.yugabyte.com/blog/aws-clock-synchronization/).
+
+Install ENA on servers:
+
+```
+git clone https://github.com/amzn/amzn-drivers.git
+cd amzn-drivers/kernel/linux/ena
+ENA_PHC_INCLUDE=1 make
+sudo cp ena.ko /lib/modules/`uname -r`
+sudo modprobe ptp # must do before insmod ena.ko?
+sudo rmmod ena; sudo insmod /lib/modules/`uname -r`/ena.ko phc_enable=1
+ls /dev/ptp0  # should exist now
+echo 'refclock PHC /dev/ptp0 poll 0 delay 0.000010 prefer' | sudo tee /etc/chrony/chrony.conf
+sudo systemctl daemon-reload
+sudo systemctl restart chronyd
+```
+
+After each reboot for some reason I have to do the following:
+
+```
+ls /lib/modules/`uname -r`/ena.ko # make sure it's there
+sudo rmmod ena && sudo insmod /lib/modules/`uname -r`/ena.ko phc_enable=1
+sudo systemctl daemon-reload
+sudo systemctl restart chronyd
+# should have clock status SYNCHRONIZED
+~/clock-bound/examples/c/src/clockbound_now
+```
+
+## clock-bound
+
+Install Amazon's clock-bound daemon and library on all nodes.
+
+I'm running on AWS, m6g.2xlarge in us-east, so I have AWS TimeSync and chronyd by default. I follow [the instructions](https://github.com/aws/clock-bound/blob/main/clock-bound-d/README.md) and increase maxclockerror in /etc/chrony/chrony.conf.
+
+````
+curl https://sh.rustup.rs -sSf | sh  # Install Cargo
+git clone git@github.com:aws/clock-bound.git; cd clock-bound; ~/.cargo/bin/cargo build --release
+sudo usermod -aG _chrony ubuntu  # let ubuntu user access chronyd's domain socket
+sudo mv target/release/clockbound /usr/local/bin/clockbound
+sudo chown _chrony:_chrony /usr/local/bin/clockbound
+
+sudo tee /usr/lib/systemd/system/clockbound.service <<EOF
+[Unit]
+Description=ClockBound
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+ExecStart=/usr/local/bin/clockbound --max-drift-rate 50
+RuntimeDirectory=clockbound
+RuntimeDirectoryPreserve=yes
+WorkingDirectory=/run/clockbound
+User=_chrony
+Group=_chrony
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable clockbound
+sudo systemctl start clockbound
+
+cd clock-bound-ffi
+~/.cargo/bin/cargo build --release
+cd ..
+sudo cp clock-bound-ffi/include/clockbound.h /usr/include/
+sudo cp target/release/libclockbound.a /usr/lib/
+sudo cp target/release/libclockbound.so /usr/lib/
+cd examples/c/src/
+gcc clockbound_now.c -o clockbound_now -I/usr/include -L/usr/lib -lclockbound
+
+sudo ls -l /var/run/clockbound/shm
+./clockbound_now
+````
+
+Example clockbound_now output showing the server is correctly configured, the status is SYNCHRONIZED and the bounds are 28 microseconds apart:
+```
+When clockbound_now was called true time was somewhere within 1738356714.903589513 and 1738356714.903617449 seconds since Jan 1 1970. The clock status is SYNCHRONIZED.
+It took 7.781244248 seconds to call clock bound 100000000 times (12851415 tps).
+```
+
+## LogCabin
+
+Only needed on the client, since we'll share it over sshfs with the servers, below.
+
+```
+cd
+git clone git@github.com:mongodb-labs/logcabin.git
+cd logcabin
+git checkout --track origin/leaseguard
+git submodule update --init
+scons
+sudo scons install
+# LogCabin's "scons install" doesn't install client dev files
+sudo cp -r include/LogCabin /usr/include
+sudo cp build/liblogcabin.a /usr/lib
+```
+
+# sshfs
+
+You want file changes on the client node to be synced to the servers. It's convenient when you make LogCabin code changes and recompile. The benchmarks rely on this: they write config files locally at the start of each run and expect the config files to appear on the servers moments later.
+
+On each server (not the client):
+
+```
+ssh -i ~/.ssh/MY-PRIVATE-KEY.pem -o BatchMode=yes -o StrictHostKeyChecking=no ubuntu@CLIENT-INSTANCE.amazonaws.com exit # test ssh
+sudo apt install -y sshfs
+mkdir logcabin
+sshfs -o IdentityFile=~/.ssh/MY-PRIVATE-KEY.pem -o StrictHostKeyChecking=no ubuntu@CLIENT-INSTANCE.amazonaws.com:/home/ubuntu/logcabin  /home/ubuntu/logcabin
+```
+
+Now in ~/logcabin on the servers you should see the same files as on the client machine.
+
+After each reboot:
+
+```
+# restart sshfs
+cd
+killall sshfs
+rm logcabin/*.out
+sshfs -o IdentityFile=~/.ssh/MY-PRIVATE-KEY.pem -o StrictHostKeyChecking=no ubuntu@CLIENT-INSTANCE.amazonaws.com:/home/ubuntu/logcabin  /home/ubuntu/logcabin
+```
+
+## Experiments
+
+To reproduce the charts in the LeaseGuard paper (this will take several days):
 
 ```
 python3 leaseguard_experiments/network_latency_experiment.py --servers=server1,server2,server3 --trials 3
 python3 leaseguard_experiments/unavailability_experiment.py --servers=server1,server2,server3 
+python3 leaseguard_experiments/latency_vs_throughput_experiment.py --servers=server1,server2,server3 --trials 10
 python3 make_charts.py
 ```
 
 Replace "server1,server2,server3" with three servers which the Python scripts can control via passwordless ssh.
+
+LogCabin's original README follows.
 
 [![logo](logo/500px.png?raw=true)](logo/logo.svg)
 
